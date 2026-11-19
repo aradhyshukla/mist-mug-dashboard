@@ -1,0 +1,120 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 24 9% 8%;
+    --card: 0 0% 100%;
+    --card-foreground: 24 9% 8%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 24 9% 8%;
+    --primary: 33 68% 50%;
+    --primary-foreground: 13 40% 8%;
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 24 9% 8%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 15% 45%;
+    --accent: 33 68% 50%;
+    --accent-foreground: 13 40% 8%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 214 15% 88%;
+    --input: 214 15% 88%;
+    --ring: 33 68% 50%;
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 222 84% 5%;
+    --foreground: 210 40% 98%;
+    --card: 222 84% 5%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222 84% 5%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 33 68% 50%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 217 32% 17%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217 32% 17%;
+    --muted-foreground: 215 20% 65%;
+    --accent: 33 68% 50%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62% 50%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217 32% 17%;
+    --input: 217 32% 17%;
+    --ring: 33 68% 50%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-paper text-ink;
+    font-family: var(--font-sans);
+  }
+  h1, h2, h3, h4, .font-serif {
+    font-family: var(--font-serif);
+  }
+  .font-hand {
+    font-family: var(--font-hand);
+  }
+}
+
+@layer components {
+  .btn-brand {
+    @apply inline-flex items-center justify-center gap-2 px-6 py-3 bg-forest text-cream font-medium text-sm rounded-md border border-forest transition-all hover:bg-[#0e2018] hover:-translate-y-[1px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2 active:translate-y-0;
+  }
+  .btn-brand-ghost {
+    @apply inline-flex items-center justify-center gap-2 px-6 py-3 bg-transparent text-forest font-medium text-sm rounded-md border border-forest transition-all hover:bg-forest hover:text-cream focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2;
+  }
+  .btn-brand-gold {
+    @apply inline-flex items-center justify-center gap-2 px-6 py-3 bg-gold text-coffee font-semibold text-sm rounded-md border border-gold transition-all hover:bg-[#e2a24a] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2;
+  }
+  .btn-brand-sm {
+    @apply px-3 py-1.5 text-xs;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-forest text-forest text-xs font-medium transition-all hover:bg-forest hover:text-cream;
+  }
+  .chip.active {
+    @apply bg-forest text-cream border-forest;
+  }
+  .card-premium {
+    @apply bg-paper border border-line rounded-xl shadow-sm overflow-hidden transition-all hover:shadow-md;
+  }
+  .input-brand {
+    @apply block w-full px-4 py-2.5 bg-cream border border-line rounded-md text-ink placeholder-rain/60 focus:outline-none focus:ring-2 focus:ring-gold focus:border-transparent transition-all;
+  }
+  .label-brand {
+    @apply text-sm font-medium text-ink mb-1.5 block;
+  }
+  .section-header {
+    @apply mb-8 flex items-baseline gap-2;
+  }
+  .section-title {
+    @apply text-2xl font-serif text-ink tracking-tight;
+  }
+  .section-subtitle {
+    @apply text-sm text-rain/70 font-sans;
+  }
+  .empty-state {
+    @apply flex flex-col items-center justify-center py-16 text-center;
+  }
+  .badge-available {
+    @apply inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#d8e8dc]/60 text-[#1e5e3a] text-xs font-medium border border-[#1e5e3a]/30;
+  }
+  .badge-deactivated {
+    @apply inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#f5dede]/60 text-[#8a2f1d] text-xs font-medium border border-[#8a2f1d]/30;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
