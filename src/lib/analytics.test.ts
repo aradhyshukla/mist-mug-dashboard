@@ -29,6 +29,7 @@ import {
   computeMonthlyBreakdown,
   computeYearlyBreakdown,
   computeCategoryPerformance,
+  computeCategoryRevenue,
 } from '@/lib/analytics'
 
 // Test fixtures with known expected totals
@@ -295,6 +296,41 @@ describe('computeCategoryPerformance', () => {
     const bakery = data.find((c) => c.category === 'Bakery')!
     expect(bakery.revenueInr).toBe(760) // 480 + 280
     expect(bakery.quantitySold).toBe(5) // 3 + 2
+  })
+})
+
+describe('computeCategoryRevenue', () => {
+  it('groups by verified category and sums revenue', async () => {
+    const data = await computeCategoryRevenue()
+    const bakery = data.find((c) => c.category === 'Bakery')!
+    expect(bakery.revenueInr).toBe(760)
+    expect(bakery.quantitySold).toBe(5)
+  })
+
+  it('reports unknown categories as Unclassified instead of Coffee', async () => {
+    vi.mocked(getAllImportLines).mockResolvedValue([
+      { ...FIXTURE_LINES[0], categoryResolved: 'Coffee' },
+      { ...FIXTURE_LINES[1], categoryResolved: 'Unknown Category' },
+    ])
+    const data = await computeCategoryRevenue()
+    const coffee = data.find((c) => c.category === 'Coffee')!
+    const unclassified = data.find((c) => c.category === 'Unclassified')!
+    expect(coffee.revenueInr).toBe(360)
+    expect(unclassified.revenueInr).toBe(90)
+    expect(data.find((c) => c.category === 'Coffee')!.revenueInr).toBe(360)
+  })
+
+  it('total category revenue reconciles with overall revenue', async () => {
+    const cats = await computeCategoryRevenue()
+    const catTotal = cats.reduce((s, c) => s + c.revenueInr, 0)
+    const m = await computeDashboardMetrics()
+    expect(catTotal).toBe(m.revenueInr)
+  })
+
+  it('returns empty array for no data', async () => {
+    vi.mocked(getAllImportLines).mockResolvedValue([])
+    const data = await computeCategoryRevenue()
+    expect(data).toEqual([])
   })
 })
 

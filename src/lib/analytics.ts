@@ -12,6 +12,7 @@ import type {
   MonthlyData,
   YearlyData,
   ProductPerformance,
+  ProductCategory,
   CategoryPerformance,
   HourlyData,
   DailyData,
@@ -488,31 +489,69 @@ export async function computeCategoryPerformance(
   startDate?: string,
   endDate?: string
 ): Promise<CategoryPerformance[]> {
-  const all = await fetchValidLines()
-  const filtered = filterByDateRange(all, startDate, endDate)
+  const revenue = await computeCategoryRevenue(startDate, endDate)
+  return revenue.map((c) => ({
+    category: c.category as ProductCategory,
+    quantitySold: c.quantitySold,
+    revenueInr: c.revenueInr,
+    productCount: c.productCount,
+  }))
+}
 
-  const catMap = new Map<string, { revenue: number; quantity: number; products: Set<string> }>()
+// ---------------------------------------------------------------
+// Shared Category Revenue Aggregation (Preferences 2 & 4)
+//
+// Single source of truth for category-wise revenue distribution used by
+// both the Top-Selling Products donut view and the Category Performance
+// donut chart. Categories not in the verified set are reported as
+// "Unclassified" rather than being incorrectly lumped into Coffee.
+// Historical records are never modified.
+// ---------------------------------------------------------------
+
+export const VERIFIED_CATEGORIES: ReadonlySet<string> = new Set([
+  'Coffee',
+  'Tea',
+  'Bakery',
+  'Cold Beverage',
+  'Signature',
+  'Merchandise',
+]);
+
+export interface CategoryRevenue {
+  category: string;
+  revenueInr: number;
+  quantitySold: number;
+  productCount: number;
+}
+
+export async function computeCategoryRevenue(
+  startDate?: string,
+  endDate?: string
+): Promise<CategoryRevenue[]> {
+  const all = await fetchValidLines();
+  const filtered = filterByDateRange(all, startDate, endDate);
+
+  const catMap = new Map<string, { revenue: number; quantity: number; products: Set<string> }>();
 
   for (const line of filtered) {
-    const existing = catMap.get(line.categoryResolved) || {
-      revenue: 0,
-      quantity: 0,
-      products: new Set(),
-    }
-    existing.revenue += line.lineTotalInr
-    existing.quantity += line.quantity
-    existing.products.add(line.productName)
-    catMap.set(line.categoryResolved, existing)
+    const category = VERIFIED_CATEGORIES.has(line.categoryResolved)
+      ? line.categoryResolved
+      : 'Unclassified';
+    const existing = catMap.get(category) || { revenue: 0, quantity: 0, products: new Set() };
+    existing.revenue += line.lineTotalInr;
+    existing.quantity += line.quantity;
+    existing.products.add(line.productName);
+    catMap.set(category, existing);
   }
 
   return Array.from(catMap.entries())
     .map(([category, data]) => ({
-      category: category as any,
+      category,
       quantitySold: data.quantity,
       revenueInr: Math.round(data.revenue * 100) / 100,
       productCount: data.products.size,
     }))
-    .sort((a, b) => b.revenueInr - a.revenueInr)
+    .sort((a, b) => b.revenueInr - a.revenueInr);
 }
 
 // ============================================================================

@@ -29,6 +29,7 @@ import type { ProcessedLine } from '@/types'
 import { onDataChanged } from '@/lib/events'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { WeekdayWeekendChart } from '@/components/analytics/WeekdayWeekendChart'
 import { Link } from 'react-router-dom'
 
 const ANALYTICS_STORAGE_KEY = 'mistmug:analytics:appliedPeriod'
@@ -296,9 +297,9 @@ export function SalesAnalytics() {
             </section>
 
             {/* Weekday vs Weekend */}
-            <section className="card-premium p-6">
-              <h3 className="font-serif text-lg text-ink mb-4">Weekday vs Weekend</h3>
-              {weekdayWeekend ? (
+            <WeekdayWeekendChart data={weekdayWeekend} />
+            {weekdayWeekend ? (
+              <section className="card-premium p-6 mt-6">
                 <div className="space-y-4">
                   <div className="grid grid-cols-2 gap-4">
                     <div className="p-4 bg-[#d8e8dc]/30 rounded-lg border border-[#1e5e3a]/30">
@@ -338,10 +339,8 @@ export function SalesAnalytics() {
                     )}
                   </div>
                 </div>
-              ) : (
-                <EmptyState title="No data" description="No weekday/weekend data available." />
-              )}
-            </section>
+              </section>
+            ) : null}
           </div>
 
           {/* Revenue Trends */}
