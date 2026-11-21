@@ -136,6 +136,7 @@ export interface ProcessedLine {
   compositeKey: string // stable composite identifier (transactionId + lineId or fallback)
   transactionId: string
   lineId?: string
+  batchId?: UploadBatchId // originating upload batch, set at import time
   date: string // ISO date string
   time?: string
   itemName: string

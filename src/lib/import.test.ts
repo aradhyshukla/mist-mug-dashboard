@@ -11,7 +11,7 @@ import {
   parseNumber,
   processRows,
 } from '@/lib/import'
-import { db, saveImportResult } from '@/db'
+import { db, saveImportResult, removeImportBatch } from '@/db'
 import type { ImportResult, ProcessedLine, UploadBatchId } from '@/types'
 
 describe('normalizeHeader', () => {
@@ -290,7 +290,7 @@ describe('saveImportResult', () => {
     }
   }
 
-  function buildResult(lines: ProcessedLine[]): ImportResult {
+  function buildResult(lines: ProcessedLine[]): ImportResult & { fileName: string; fileSize: number } {
     const accepted = lines.filter((l) => l.isValid && !l.isDuplicate)
     const rejected = lines.filter((l) => !l.isValid)
     const duplicates = lines.filter((l) => l.isDuplicate)
@@ -305,6 +305,8 @@ describe('saveImportResult', () => {
       dateRange: { earliest: '2024-11-04', latest: '2024-11-04' },
       totalRevenueInr: accepted.reduce((sum, l) => sum + l.lineTotalInr, 0),
       status: 'imported',
+      fileName: 'test.csv',
+      fileSize: 1024,
     }
   }
 
@@ -425,5 +427,162 @@ describe('saveImportResult', () => {
         totalRevenueInr: 360,
       }),
     )
+  })
+
+  it('stores original filename and file size (not batch ID)', async () => {
+    vi.spyOn(db.importLines, 'toArray').mockResolvedValue([])
+    vi.spyOn(db.importLines, 'bulkAdd').mockResolvedValue(1 as any)
+    const putSpy = vi.spyOn(db.importBatches, 'put').mockResolvedValue(undefined as any)
+    mockTransaction()
+
+    const lines = [makeLine('txn1|Coffee|2024-11-04', 'txn1', true, false)]
+    const result = buildResult(lines)
+    result.fileName = 'weekly-sales-nov.csv'
+    result.fileSize = 4096
+
+    await saveImportResult(result)
+
+    expect(putSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fileName: 'weekly-sales-nov.csv',
+        fileSize: 4096,
+      }),
+    )
+  })
+
+  it('returns actual inserted and skipped counts', async () => {
+    vi.spyOn(db.importLines, 'toArray').mockResolvedValue([
+      makeLine('txn1|Coffee|2024-11-04', 'txn1'), // already exists
+    ])
+    const bulkAddSpy = vi.spyOn(db.importLines, 'bulkAdd').mockResolvedValue(1 as any)
+    vi.spyOn(db.importBatches, 'put').mockResolvedValue(undefined as any)
+    mockTransaction()
+
+    // txn1 exists (should be skipped), txn2 is new (should be inserted)
+    const lines = [
+      makeLine('txn1|Coffee|2024-11-04', 'txn1', true, false),
+      makeLine('txn2|Tea|2024-11-04', 'txn2', true, false),
+    ]
+
+    const result = await saveImportResult(buildResult(lines))
+
+    expect(result.insertedRows).toBe(1)
+    expect(result.skippedDuplicates).toBe(1)
+    expect(bulkAddSpy).toHaveBeenCalledTimes(1)
+    const stored = bulkAddSpy.mock.calls[0][0]
+    expect(stored).toHaveLength(1)
+    expect(stored[0].compositeKey).toBe('txn2|Tea|2024-11-04')
+  })
+
+  it('strips id from lines before bulkAdd (auto-increment PK)', async () => {
+    vi.spyOn(db.importLines, 'toArray').mockResolvedValue([])
+    const bulkAddSpy = vi.spyOn(db.importLines, 'bulkAdd').mockResolvedValue(1 as any)
+    vi.spyOn(db.importBatches, 'put').mockResolvedValue(undefined as any)
+    mockTransaction()
+
+    const lines = [makeLine('txn1|Coffee|2024-11-04', 'txn1', true, false)]
+    // Simulate a line that somehow has an id property set
+    ;(lines[0] as any).id = 999
+
+    await saveImportResult(buildResult(lines))
+
+    const stored = bulkAddSpy.mock.calls[0][0]
+    expect(stored[0].id).toBeUndefined()
+  })
+})
+
+// ============================================================================
+// removeImportBatch tests (B-02: batch deletion)
+// ============================================================================
+
+describe('removeImportBatch', () => {
+  function makeLine(
+    compositeKey: string,
+    transactionId: string,
+    isValid = true,
+    isDuplicate = false,
+  ): ProcessedLine {
+    return {
+      compositeKey,
+      transactionId,
+      lineId: undefined,
+      date: '2024-11-04',
+      time: undefined,
+      itemName: 'Coffee',
+      categoryResolved: 'Coffee',
+      quantity: 2,
+      unitPriceInr: 180,
+      lineTotalInr: 360,
+      productId: undefined,
+      productName: 'Coffee',
+      validationIssues: [],
+      isValid,
+      isDuplicate,
+    }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  const mockTransaction = () =>
+    vi
+      .spyOn(db, 'transaction' as any)
+      .mockImplementation(async (...args: any[]) => {
+        const fn = args.pop()
+        await fn()
+      })
+
+  it('filters lines by batchId not transactionId', async () => {
+    const linesInDb = [
+      { ...makeLine('txn1|Coffee|2024-11-04', 'txn1', true, false), batchId: 'batch_A' as UploadBatchId, id: 1 },
+      { ...makeLine('txn2|Tea|2024-11-04', 'txn2', true, false), batchId: 'batch_B' as UploadBatchId, id: 2 },
+      { ...makeLine('txn3|Tea|2024-11-04', 'txn3', true, false), batchId: 'batch_A' as UploadBatchId, id: 3 },
+    ]
+    const deleteLineSpy = vi.spyOn(db.importLines, 'delete').mockResolvedValue(undefined as any)
+    const deleteBatchSpy = vi.spyOn(db.importBatches, 'delete').mockResolvedValue(undefined as any)
+    const getBatchSpy = vi.spyOn(db.importBatches, 'get').mockResolvedValue(linesInDb[0] as any)
+    vi.spyOn(db.importLines, 'toArray').mockResolvedValue(linesInDb)
+    vi.spyOn(db.importLines, 'where').mockReturnValue({
+      equals: vi.fn().mockReturnValue({
+        count: vi.fn().mockResolvedValue(1),
+      }),
+    } as unknown as any)
+    mockTransaction()
+
+    await removeImportBatch('batch_A' as UploadBatchId)
+
+    expect(getBatchSpy).toHaveBeenCalledWith('batch_A')
+    expect(deleteBatchSpy).toHaveBeenCalledWith('batch_A')
+    expect(deleteLineSpy).toHaveBeenCalledTimes(2)
+    const deletedIds = deleteLineSpy.mock.calls.map((call) => call[0])
+    expect(deletedIds).toContain(linesInDb[0].id)
+    expect(deletedIds).toContain(linesInDb[2].id)
+    expect(deletedIds).not.toContain(linesInDb[1].id)
+  })
+
+  it('preserves lines shared with other batches', async () => {
+    const sharedLine = {
+      ...makeLine('txn1|Coffee|2024-11-04', 'txn1', true, false),
+      batchId: 'batch_A' as UploadBatchId,
+      id: 1,
+    }
+    const linesInDb = [sharedLine]
+    const deleteLineSpy = vi.spyOn(db.importLines, 'delete').mockResolvedValue(undefined as any)
+    const deleteBatchSpy = vi.spyOn(db.importBatches, 'delete').mockResolvedValue(undefined as any)
+    const getBatchSpy = vi.spyOn(db.importBatches, 'get').mockResolvedValue(sharedLine as any)
+    vi.spyOn(db.importLines, 'toArray').mockResolvedValue(linesInDb)
+    vi.spyOn(db.importLines, 'where').mockReturnValue({
+      equals: vi.fn().mockReturnValue({
+        count: vi.fn().mockResolvedValue(2),
+      }),
+    } as unknown as any)
+    mockTransaction()
+
+    await removeImportBatch('batch_A' as UploadBatchId)
+
+    expect(getBatchSpy).toHaveBeenCalledWith('batch_A')
+    expect(deleteBatchSpy).toHaveBeenCalledWith('batch_A')
+    expect(deleteLineSpy).not.toHaveBeenCalled() // shared line is not deleted
   })
 })

@@ -15,6 +15,7 @@ import { ImportPreviewStep } from '@/components/common/ImportPreview'
 import { parseCsvFile, parseXlsxFile } from '@/lib/import'
 import { saveImportResult, getAllImportBatches, removeImportBatch } from '@/db'
 import { formatDate } from '@/lib/utils'
+import type { ProcessedLine, UploadBatchId } from '@/types'
 
 export function UploadData() {
   const [file, setFile] = React.useState<File | null>(null)
@@ -24,6 +25,7 @@ export function UploadData() {
   const [batches, setBatches] = React.useState<Array<{
     id: string
     fileName: string
+    fileSize: number
     uploadedAt: string
     status: string
     acceptedRows: number
@@ -38,17 +40,7 @@ export function UploadData() {
   const [importMessage, setImportMessage] = React.useState<string | null>(null)
 
   const [batchesLoading, setBatchesLoading] = React.useState(true)
-
-  React.useEffect(() => {
-    loadBatches()
-  }, [])
-
-  async function loadBatches() {
-    setBatchesLoading(true)
-    const all = await getAllImportBatches()
-    setBatches(all)
-    setBatchesLoading(false)
-  }
+  const [batchesError, setBatchesError] = React.useState<string | null>(null)
 
   const fileInputRef = React.useRef<HTMLInputElement>(null)
 
@@ -107,12 +99,17 @@ export function UploadData() {
     setRows([])
     setStep('idle')
     setImportMessage(null)
+    // Reset the file input so the same file can be selected again
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
   }
 
-  const handleImport = async (_mapping: any, lines: any[]) => {
+  const handleImport = async (_mapping: any, lines: ProcessedLine[]) => {
     setLoading(true)
     setImportMessage(null)
     try {
+      if (!file) throw new Error('No file selected')
       const batchId = `batch_${Date.now()}`
       const accepted = lines.filter((l) => l.isValid && !l.isDuplicate)
       const rejected = lines.filter((l) => !l.isValid)
@@ -122,22 +119,32 @@ export function UploadData() {
       const earliest = dates.length > 0 ? dates.sort()[0] : null
       const latest = dates.length > 0 ? dates.sort().reverse()[0] : null
 
+      // Tag each line with its originating batch ID before saving
+      const taggedLines = lines.map((line) => ({
+        ...line,
+        batchId: batchId as UploadBatchId,
+      }))
+
       const result = {
         batchId: batchId as any,
         totalRows: lines.length,
         acceptedRows: accepted.length,
         rejectedRows: rejected.length,
         duplicateRows: duplicates.length,
-        lines,
+        lines: taggedLines,
         validationIssues: lines.flatMap((l) => l.validationIssues),
         dateRange: { earliest, latest },
         totalRevenueInr: totalRevenue,
         status: 'imported' as const,
+        fileName: file.name,
+        fileSize: file.size,
       }
 
-      await saveImportResult(result)
+      const { insertedRows, skippedDuplicates } = await saveImportResult(result)
       setStep('imported')
-      setImportMessage(`Imported ${accepted.length} record(s) successfully.`)
+      setImportMessage(
+        `Imported ${insertedRows} record(s) successfully.${skippedDuplicates > 0 ? ` ${skippedDuplicates} duplicate(s) skipped.` : ''}`,
+      )
       await loadBatches()
     } catch (err) {
       alert(`Import failed: ${err instanceof Error ? err.message : String(err)}`)
@@ -146,8 +153,27 @@ export function UploadData() {
     }
   }
 
+  async function loadBatches() {
+    setBatchesLoading(true)
+    setBatchesError(null)
+    try {
+      const all = await getAllImportBatches()
+      setBatches(all)
+    } catch (err) {
+      setBatchesError(err instanceof Error ? err.message : 'Failed to load upload history')
+      setBatches([])
+    } finally {
+      setBatchesLoading(false)
+    }
+  }
+
   const handleRemoveBatch = async (id: string) => {
-    if (!window.confirm('Remove this upload batch? Associated transaction lines unique to this batch will be deleted.')) return
+    if (
+      !window.confirm(
+        'Remove this upload batch? Transaction lines unique to this batch will be deleted. Lines shared with other batches will be preserved.',
+      )
+    )
+      return
     try {
       await removeImportBatch(id as any)
       await loadBatches()
@@ -155,6 +181,10 @@ export function UploadData() {
       alert(`Failed to remove batch: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
+
+  React.useEffect(() => {
+    loadBatches()
+  }, [])
 
   return (
     <div className="space-y-8">
@@ -261,6 +291,9 @@ ${headers.join(', ')}`}
             setImportMessage(null)
             setHeaders([])
             setRows([])
+            if (fileInputRef.current) {
+              fileInputRef.current.value = ''
+            }
           }}>
             Upload Another File
           </Button>
@@ -271,12 +304,18 @@ ${headers.join(', ')}`}
       <section className="card-premium p-6">
         <div className="flex items-center justify-between mb-6">
           <h3 className="font-serif text-lg text-ink">Past Uploads</h3>
-          {batchesLoading && <span className="text-xs text-rain/50 animate-pulse">Loading…</span>}
         </div>
 
         {batchesLoading ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <p className="text-rain/60 text-sm">Loading upload history…</p>
+          </div>
+        ) : batchesError ? (
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <p className="text-[#8a2f1d] text-sm mb-4">{batchesError}</p>
+            <Button variant="brand" size="sm" onClick={loadBatches}>
+              Retry
+            </Button>
           </div>
         ) : batches.length === 0 ? (
           <EmptyState
@@ -290,6 +329,7 @@ ${headers.join(', ')}`}
               <TableHeader>
                 <TableRow>
                   <TableHead>Filename</TableHead>
+                  <TableHead>Size</TableHead>
                   <TableHead>Uploaded</TableHead>
                   <TableHead>Date Range</TableHead>
                   <TableHead>Accepted</TableHead>
@@ -304,6 +344,9 @@ ${headers.join(', ')}`}
                 {batches.map((batch) => (
                   <TableRow key={batch.id}>
                     <TableCell className="text-sm font-medium text-ink truncate max-w-xs">{batch.fileName}</TableCell>
+                    <TableCell className="text-sm text-rain/60">
+                      {(batch.fileSize / 1024).toFixed(1)} KB
+                    </TableCell>
                     <TableCell className="text-sm text-rain/60">{formatDate(batch.uploadedAt)}</TableCell>
                     <TableCell className="text-sm text-rain/60">
                       {batch.earliestTransactionDate && batch.latestTransactionDate

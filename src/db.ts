@@ -48,6 +48,15 @@ export class MistMugDB extends Dexie {
       importLines: '++id, compositeKey, transactionId, date, itemName, categoryResolved',
       importBatches: 'id, fileName, uploadedAt, status',
     })
+    this.version(3).stores({
+      products: '++id, name, category, isActive, updatedAt',
+      transactions: '++id, productId, category',
+      uploadBatches: '++id, fileName, uploadedAt, status, reportingPeriod',
+      reportingPeriods: '++id, type, startDate, endDate, createdAt',
+      settings: 'id',
+      importLines: '++id, compositeKey, transactionId, date, itemName, categoryResolved, batchId',
+      importBatches: 'id, fileName, uploadedAt, status',
+    })
   }
 }
 
@@ -254,12 +263,12 @@ export async function compositeKeyExists(compositeKey: string): Promise<boolean>
   return count > 0
 }
 
-export async function saveImportResult(result: ImportResult): Promise<void> {
+export async function saveImportResult(result: ImportResult & { fileName: string; fileSize: number }): Promise<{ insertedRows: number; skippedDuplicates: number }> {
   const batchId = result.batchId
   const batchSummary: UploadBatchSummary & { id: UploadBatchId } = {
     id: batchId,
-    fileName: result.batchId.toString(),
-    fileSize: 0,
+    fileName: result.fileName,
+    fileSize: result.fileSize,
     uploadedAt: new Date().toISOString(),
     status: result.status,
     acceptedRows: result.acceptedRows,
@@ -271,19 +280,25 @@ export async function saveImportResult(result: ImportResult): Promise<void> {
   }
 
   // Only persist accepted (valid, non-duplicate) lines. Within-file duplicate
-  // lines share the same compositeKey and must not be stored, because
-  // compositeKey is a unique index on the importLines table.
+  // lines share the same compositeKey and must not be stored.
   const acceptedLines = result.lines.filter((l) => l.isValid && !l.isDuplicate)
+
+  // Tag each line with its originating batch ID so batch deletion can
+  // accurately identify which lines belong to which upload.
+  const taggedLines = acceptedLines.map((line) => ({ ...line, batchId }))
+
+  let insertedRows = 0
+  let skippedDuplicates = 0
 
   await db.transaction('rw', db.importBatches, db.importLines, async () => {
     // Reject cross-batch duplicates: any line whose compositeKey already
-    // exists in the database must not be re-inserted (would violate the
-    // compositeKey unique index and would double-count revenue).
+    // exists in the database must not be re-inserted (would double-count revenue).
     const existingLines = await db.importLines.toArray()
     const existingKeySet = new Set(existingLines.map((l) => l.compositeKey))
-    const newLines = acceptedLines.filter((l) => !existingKeySet.has(l.compositeKey))
+    const newLines = taggedLines.filter((l) => !existingKeySet.has(l.compositeKey))
+    skippedDuplicates = taggedLines.length - newLines.length
 
-    if (newLines.length === 0 && acceptedLines.length > 0) {
+    if (newLines.length === 0 && taggedLines.length > 0) {
       throw new Error(
         'Import aborted: every accepted transaction line already exists in the database (duplicate compositeKey). ' +
           'No records were saved.',
@@ -292,13 +307,20 @@ export async function saveImportResult(result: ImportResult): Promise<void> {
 
     await db.importBatches.put(batchSummary)
     if (newLines.length > 0) {
-      // Do not pass id: 0 for every row — the ++id primary key is auto-incremented
-      // by Dexie. Passing the same explicit id for all rows would violate primary
-      // key uniqueness and fail the entire bulk operation.
-      const linesToStore = newLines.map((line) => ({ ...line } as ProcessedLine & { id: number }))
-      await db.importLines.bulkAdd(linesToStore)
+      // Dexie's ++id primary key is auto-incremented. Do not pass an explicit id;
+      // pass only the ProcessedLine fields and let Dexie assign the id at runtime.
+      const linesToStore = newLines.map((line) => {
+        const { id, ...rest } = line as ProcessedLine & { id?: number }
+        return rest as ProcessedLine
+      })
+      await db.importLines.bulkAdd(
+        linesToStore as unknown as (ProcessedLine & { id: number })[],
+      )
+      insertedRows = newLines.length
     }
   })
+
+  return { insertedRows, skippedDuplicates }
 }
 
 export async function getAllImportBatches(): Promise<UploadBatchSummary[]> {
@@ -314,7 +336,9 @@ export async function removeImportBatch(id: UploadBatchId): Promise<void> {
   if (!batch) return
 
   const lines = await db.importLines.toArray()
-  const linesToDelete = lines.filter((l) => l.transactionId === id.toString())
+  // Lines are tagged with their originating batchId at import time.
+  // Only remove lines that belong exclusively to this batch.
+  const linesToDelete = lines.filter((l) => l.batchId === id)
 
   await db.transaction('rw', db.importLines, db.importBatches, async () => {
     await db.importBatches.delete(id)
