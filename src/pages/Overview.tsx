@@ -165,17 +165,15 @@ export function Overview() {
           <SectionHeader
             title="Product Catalogue"
             description={`Manage ${products.length} product${products.length !== 1 ? 's' : ''}. Prices shown are current catalogue prices in INR (₹).`}
-            action={
-              <Button variant="brand" size="sm" onClick={() => {
-                setEditingProduct(null)
-                setDialogOpen(true)
-              }}>
-                <Plus className="w-4 h-4 mr-2" /> Add Product
-              </Button>
-            }
           />
         </div>
-        <div className="flex-shrink-0">
+        <div className="flex gap-3 flex-shrink-0">
+          <Button variant="brand" size="sm" onClick={() => {
+            setEditingProduct(null)
+            setDialogOpen(true)
+          }}>
+            <Plus className="w-4 h-4 mr-2" /> Add Product
+          </Button>
           <Button variant="brand-gold" size="sm" onClick={() => navigate('/upload')} className="px-6">
             Upload Weekly Sales →
           </Button>

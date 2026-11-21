@@ -38,12 +38,6 @@ export function Settings() {
   const [location, setLocation] = React.useState('')
   const [contact, setContact] = React.useState('')
 
-  // Display preferences
-  const [currency, setCurrency] = React.useState('INR')
-  const [theme, setTheme] = React.useState<'light' | 'dark'>('light')
-  const [dateFormat, setDateFormat] = React.useState<'DD/MM/YYYY' | 'MM/DD/YYYY' | 'YYYY-MM-DD'>('DD/MM/YYYY')
-  const [chartPreference, setChartPreference] = React.useState<'bars' | 'lines'>('bars')
-
   // Product management
   const [products, setProducts] = React.useState<Product[]>([])
   const [productDialogOpen, setProductDialogOpen] = React.useState(false)
@@ -71,10 +65,6 @@ export function Settings() {
         setCafeDescription(settings.cafeDescription)
         setLocation(settings.location)
         setContact(settings.contact ?? '')
-        setCurrency(settings.currency)
-        setTheme(settings.theme)
-        setDateFormat((settings.dateFormat ?? 'DD/MM/YYYY') as any)
-        setChartPreference((settings.chartPreference ?? 'bars') as any)
       }
       setProducts(allProducts)
     } catch (err) {
@@ -95,11 +85,6 @@ export function Settings() {
         cafeDescription,
         location,
         contact,
-        currency,
-        theme,
-        lowStockThreshold: 5,
-        dateFormat,
-        chartPreference,
       })
     } catch (err) {
       console.error('Failed to save settings', err)
@@ -394,44 +379,6 @@ export function Settings() {
           </div>
         </section>
 
-        {/* Display Preferences */}
-        <section className="card-premium p-6">
-          <h3 className="font-serif text-lg text-ink mb-6">Display Preferences</h3>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label>Currency</Label>
-              <Select value={currency} onChange={(e) => setCurrency(e.target.value)}>
-                <option value="INR">Indian Rupee (₹)</option>
-                <option value="USD">US Dollar ($)</option>
-                <option value="EUR">Euro (€)</option>
-                <option value="GBP">British Pound (£)</option>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Theme</Label>
-              <Select value={theme} onChange={(e) => setTheme(e.target.value as any)}>
-                <option value="light">Light</option>
-                <option value="dark">Dark</option>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Date Format</Label>
-              <Select value={dateFormat} onChange={(e) => setDateFormat(e.target.value as any)}>
-                <option value="DD/MM/YYYY">DD/MM/YYYY (e.g. 04/11/2024)</option>
-                <option value="MM/DD/YYYY">MM/DD/YYYY (e.g. 11/04/2024)</option>
-                <option value="YYYY-MM-DD">YYYY-MM-DD (e.g. 2024-11-04)</option>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Chart Display</Label>
-              <Select value={chartPreference} onChange={(e) => setChartPreference(e.target.value as any)}>
-                <option value="bars">Bar charts</option>
-                <option value="lines">Line charts</option>
-              </Select>
-            </div>
-          </div>
-        </section>
-
         <div className="pt-4">
           <Button
             type="submit"
@@ -620,7 +567,7 @@ export function Settings() {
       {productDialogOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="fixed inset-0 bg-[#142E25]/80 backdrop-blur-sm" onClick={() => setProductDialogOpen(false)} />
-          <div className="bg-paper border border-line p-6 rounded-xl shadow-lg w-full max-w-md">
+          <div className="bg-paper border border-line p-6 rounded-xl shadow-lg w-full max-w-md relative z-10">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-serif text-lg text-ink">
               {editingProduct ? 'Edit Product' : 'Add New Product'}
