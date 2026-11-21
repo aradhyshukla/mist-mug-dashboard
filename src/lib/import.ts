@@ -14,6 +14,7 @@ import type {
   ValidationIssue,
   ProductCategory,
 } from '@/types'
+import { db } from '@/db'
 
 // ---------------------------------------------------------------
 // Column alias map (reasonable aliases → canonical field names)
@@ -171,12 +172,13 @@ export function parseDateValue(value: unknown): { date: string | null; error: st
   }
 
   // Handle JavaScript Date objects (produced by SheetJS cellDates: true)
+  // Use local date components to preserve the calendar date as displayed
   if (value instanceof Date) {
     const d = value
     if (isNaN(d.getTime())) return { date: null, error: 'Invalid date' }
-    const y = d.getUTCFullYear()
-    const m = String(d.getUTCMonth() + 1).padStart(2, '0')
-    const day = String(d.getUTCDate()).padStart(2, '0')
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
     return { date: `${y}-${m}-${day}`, error: null }
   }
 
@@ -219,10 +221,22 @@ export function parseDateValue(value: unknown): { date: string | null; error: st
 
   const parsed = new Date(str)
   if (!isNaN(parsed.getTime())) {
-    const y = parsed.getUTCFullYear()
-    const m = String(parsed.getUTCMonth() + 1).padStart(2, '0')
-    const day = String(parsed.getUTCDate()).padStart(2, '0')
+    const y = parsed.getFullYear()
+    const m = String(parsed.getMonth() + 1).padStart(2, '0')
+    const day = String(parsed.getDate()).padStart(2, '0')
     return { date: `${y}-${m}-${day}`, error: null }
+  }
+
+  // Try extracting date from full date-time strings like
+  // "Thu Jan 01 2026 00:00:00 GMT+0530 (India Standard Time)"
+  const fullDateMatch = str.match(/(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{4})/)
+  if (fullDateMatch) {
+    const day = parseInt(fullDateMatch[1], 10)
+    const month = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'].indexOf(fullDateMatch[2]) + 1
+    const year = parseInt(fullDateMatch[3], 10)
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      return { date: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`, error: null }
+    }
   }
 
   return { date: null, error: 'Unrecognized date format' }
@@ -279,6 +293,17 @@ export function parseTimeValue(value: unknown): { time: string | null; error: st
       return { time: `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`, error: null }
     }
     return { time: null, error: 'Invalid time format' }
+  }
+
+  // Try extracting time from full date-time strings like
+  // "Sat Dec 30 1899 15:36:00 GMT+0521 (India Standard Time)"
+  const timeMatch = str.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/)
+  if (timeMatch) {
+    const h = parseInt(timeMatch[1], 10)
+    const m = parseInt(timeMatch[2], 10)
+    if (h >= 0 && h <= 23 && m >= 0 && m <= 59) {
+      return { time: `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`, error: null }
+    }
   }
 
   return { time: null, error: 'Unrecognized time format' }
@@ -553,4 +578,106 @@ export function processRows(
     validationIssues: issues,
     canImport: acceptedCount > 0 && rejectedCount === 0,
   }
+}
+
+// ---------------------------------------------------------------
+// Data Repair: Fix malformed date/time strings in stored records
+// ---------------------------------------------------------------
+
+const CANONICAL_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+const CANONICAL_TIME_RE = /^\d{2}:\d{2}$/
+
+export interface RepairResult {
+  repaired: number
+  unrepaired: number
+  unrepairedLines: Array<{
+    id: number
+    compositeKey: string
+    date: string
+    time: string | undefined
+    reason: string
+  }>
+}
+
+/**
+ * Scans all stored import lines and repairs malformed date/time fields.
+ *
+ * Idempotent: running multiple times produces no additional changes after
+ * the first successful run, because already-canonical values are skipped.
+ *
+ * Does not modify composite keys (they were computed at import time from
+ * raw cell values and must remain stable for deduplication).
+ *
+ * Uses a single Dexie transaction for all updates.
+ */
+export async function repairStoredDatesAndTimes(): Promise<RepairResult> {
+  const allLines = await db.importLines.toArray()
+
+  let repaired = 0
+  let unrepaired = 0
+  const unrepairedLines: RepairResult['unrepairedLines'] = []
+  const linesToUpdate: Array<ProcessedLine & { id: number }> = []
+
+  for (const line of allLines) {
+    let needsRepair = false
+    let newDate = line.date
+    let newTime = line.time
+
+    // Check date: canonical format is YYYY-MM-DD
+    if (line.date && !CANONICAL_DATE_RE.test(line.date)) {
+      const parsed = parseDateValue(line.date)
+      if (parsed.date && !parsed.error) {
+        newDate = parsed.date
+        needsRepair = true
+      } else {
+        unrepaired++
+        unrepairedLines.push({
+          id: line.id as number,
+          compositeKey: line.compositeKey,
+          date: line.date,
+          time: line.time,
+          reason: `Date: ${parsed.error || 'unparseable'}`,
+        })
+        continue // Skip this line entirely; don't update partial repairs
+      }
+    }
+
+    // Check time: canonical format is HH:mm
+    if (line.time && !CANONICAL_TIME_RE.test(line.time)) {
+      const parsed = parseTimeValue(line.time)
+      if (parsed.time && !parsed.error) {
+        newTime = parsed.time
+        needsRepair = true
+      } else {
+        unrepaired++
+        unrepairedLines.push({
+          id: line.id as number,
+          compositeKey: line.compositeKey,
+          date: line.date,
+          time: line.time,
+          reason: `Time: ${parsed.error || 'unparseable'}`,
+        })
+        continue
+      }
+    }
+
+    if (needsRepair) {
+      repaired++
+      linesToUpdate.push({
+        ...line,
+        date: newDate,
+        time: newTime,
+      } as ProcessedLine & { id: number })
+    }
+  }
+
+  if (linesToUpdate.length > 0) {
+    await db.transaction('rw', db.importLines, async () => {
+      for (const line of linesToUpdate) {
+        await db.importLines.put(line as ProcessedLine & { id: number })
+      }
+    })
+  }
+
+  return { repaired, unrepaired, unrepairedLines }
 }

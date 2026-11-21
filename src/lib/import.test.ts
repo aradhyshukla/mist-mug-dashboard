@@ -11,6 +11,7 @@ import {
   parseTimeValue,
   parseNumber,
   processRows,
+  repairStoredDatesAndTimes,
 } from '@/lib/import'
 import { db, saveImportResult, removeImportBatch, seedStarterCatalog, getImportLinesByBatch } from '@/db'
 import type { ImportResult, ProcessedLine, Product, ProductId, UploadBatchId } from '@/types'
@@ -246,6 +247,202 @@ describe('parseTimeValue', () => {
     const result = parseTimeValue(1.5)
     expect(result.time).toBeNull()
     expect(result.error).toBeTruthy()
+  })
+})
+
+describe('repairStoredDatesAndTimes', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  const mockTransaction = () =>
+    vi
+      .spyOn(db, 'transaction' as any)
+      .mockImplementation(async (...args: any[]) => {
+        const fn = args.pop()
+        await fn()
+      })
+
+  it('repairs malformed date strings', async () => {
+    const lines = [
+      {
+        id: 1,
+        compositeKey: 'txn1|Coffee|2026-01-01',
+        transactionId: 'txn1',
+        date: 'Thu Jan 01 2026 00:00:00 GMT+0530 (India Standard Time)',
+        time: '12:00',
+        itemName: 'Coffee',
+        categoryResolved: 'Coffee',
+        quantity: 2,
+        unitPriceInr: 180,
+        lineTotalInr: 360,
+        productId: undefined,
+        productName: 'Coffee',
+        validationIssues: [],
+        isValid: true,
+        isDuplicate: false,
+      },
+    ]
+
+    vi.spyOn(db.importLines, 'toArray').mockResolvedValue(lines)
+    const putSpy = vi.spyOn(db.importLines, 'put').mockResolvedValue(undefined as any)
+    mockTransaction()
+
+    const result = await repairStoredDatesAndTimes()
+
+    expect(result.repaired).toBe(1)
+    expect(result.unrepaired).toBe(0)
+    expect(putSpy).toHaveBeenCalledTimes(1)
+    const stored = putSpy.mock.calls[0][0]
+    expect(stored.date).toBe('2026-01-01')
+  })
+
+  it('repairs malformed time strings', async () => {
+    const lines = [
+      {
+        id: 1,
+        compositeKey: 'txn1|Coffee|2026-01-01',
+        transactionId: 'txn1',
+        date: '2026-01-01',
+        time: 'Sat Dec 30 1899 15:36:00 GMT+0521 (India Standard Time)',
+        itemName: 'Coffee',
+        categoryResolved: 'Coffee',
+        quantity: 2,
+        unitPriceInr: 180,
+        lineTotalInr: 360,
+        productId: undefined,
+        productName: 'Coffee',
+        validationIssues: [],
+        isValid: true,
+        isDuplicate: false,
+      },
+    ]
+
+    vi.spyOn(db.importLines, 'toArray').mockResolvedValue(lines)
+    const putSpy = vi.spyOn(db.importLines, 'put').mockResolvedValue(undefined as any)
+    mockTransaction()
+
+    const result = await repairStoredDatesAndTimes()
+
+    expect(result.repaired).toBe(1)
+    expect(result.unrepaired).toBe(0)
+    expect(putSpy).toHaveBeenCalledTimes(1)
+    const stored = putSpy.mock.calls[0][0]
+    expect(stored.time).toBe('15:36')
+  })
+
+  it('skips already-canonical records', async () => {
+    const lines = [
+      {
+        id: 1,
+        compositeKey: 'txn1|Coffee|2026-01-01',
+        transactionId: 'txn1',
+        date: '2026-01-01',
+        time: '12:00',
+        itemName: 'Coffee',
+        categoryResolved: 'Coffee',
+        quantity: 2,
+        unitPriceInr: 180,
+        lineTotalInr: 360,
+        productId: undefined,
+        productName: 'Coffee',
+        validationIssues: [],
+        isValid: true,
+        isDuplicate: false,
+      },
+    ]
+
+    vi.spyOn(db.importLines, 'toArray').mockResolvedValue(lines)
+    const putSpy = vi.spyOn(db.importLines, 'put').mockResolvedValue(undefined as any)
+    mockTransaction()
+
+    const result = await repairStoredDatesAndTimes()
+
+    expect(result.repaired).toBe(0)
+    expect(result.unrepaired).toBe(0)
+    expect(putSpy).not.toHaveBeenCalled()
+  })
+
+  it('reports unreparable records', async () => {
+    const lines = [
+      {
+        id: 1,
+        compositeKey: 'txn1|Coffee|garbage-date',
+        transactionId: 'txn1',
+        date: 'not-a-date-at-all',
+        time: '12:00',
+        itemName: 'Coffee',
+        categoryResolved: 'Coffee',
+        quantity: 2,
+        unitPriceInr: 180,
+        lineTotalInr: 360,
+        productId: undefined,
+        productName: 'Coffee',
+        validationIssues: [],
+        isValid: true,
+        isDuplicate: false,
+      },
+    ]
+
+    vi.spyOn(db.importLines, 'toArray').mockResolvedValue(lines)
+    const putSpy = vi.spyOn(db.importLines, 'put').mockResolvedValue(undefined as any)
+    mockTransaction()
+
+    const result = await repairStoredDatesAndTimes()
+
+    expect(result.repaired).toBe(0)
+    expect(result.unrepaired).toBe(1)
+    expect(putSpy).not.toHaveBeenCalled()
+    expect(result.unrepairedLines[0].compositeKey).toBe('txn1|Coffee|garbage-date')
+    expect(result.unrepairedLines[0].reason).toContain('Date')
+  })
+
+  it('is idempotent - running twice makes no changes the second time', async () => {
+    const lines = [
+      {
+        id: 1,
+        compositeKey: 'txn1|Coffee|2026-01-01',
+        transactionId: 'txn1',
+        date: '2026-01-01',
+        time: '12:00',
+        itemName: 'Coffee',
+        categoryResolved: 'Coffee',
+        quantity: 2,
+        unitPriceInr: 180,
+        lineTotalInr: 360,
+        productId: undefined,
+        productName: 'Coffee',
+        validationIssues: [],
+        isValid: true,
+        isDuplicate: false,
+      },
+    ]
+
+    vi.spyOn(db.importLines, 'toArray').mockResolvedValue(lines)
+    const putSpy = vi.spyOn(db.importLines, 'put').mockResolvedValue(undefined as any)
+    mockTransaction()
+
+    const result1 = await repairStoredDatesAndTimes()
+    expect(result1.repaired).toBe(0)
+    expect(putSpy).not.toHaveBeenCalled()
+
+    // Run again - same result
+    const result2 = await repairStoredDatesAndTimes()
+    expect(result2.repaired).toBe(0)
+    expect(result2.unrepaired).toBe(0)
+  })
+
+  it('returns empty results for empty database', async () => {
+    vi.spyOn(db.importLines, 'toArray').mockResolvedValue([])
+    const putSpy = vi.spyOn(db.importLines, 'put').mockResolvedValue(undefined as any)
+    mockTransaction()
+
+    const result = await repairStoredDatesAndTimes()
+
+    expect(result.repaired).toBe(0)
+    expect(result.unrepaired).toBe(0)
+    expect(result.unrepairedLines).toHaveLength(0)
+    expect(putSpy).not.toHaveBeenCalled()
   })
 })
 
