@@ -96,6 +96,7 @@ export function WeekdayWeekendChart({ data }: WeekdayWeekendChartProps) {
       <div className="h-48">
         <ResponsiveContainer width="100%" height={160}>
           <BarChart
+            layout="vertical"
             data={items}
             barCategoryGap={40}
             margin={{ top: 20, right: 24, bottom: 24, left: 80 }}

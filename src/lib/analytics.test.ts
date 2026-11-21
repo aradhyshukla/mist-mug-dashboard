@@ -463,7 +463,7 @@ describe('resolveLineCategory', () => {
   })
 
   it('falls back to verified source transaction category', () => {
-    const line = {
+    const line: ProcessedLine = {
       ...baseLine,
       productId: undefined,
       productName: 'Unknown Item',

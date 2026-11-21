@@ -445,6 +445,14 @@ describe('January 2026 regression dataset', () => {
     expect(ww.weekdayRevenue).toBe(EXPECTED.weekdayRevenue)
     expect(ww.weekendRevenue).toBe(EXPECTED.weekendRevenue)
     expect(ww.weekdayRevenue + ww.weekendRevenue).toBe(EXPECTED.revenue)
+
+    // Weekday vs Weekend bar-chart ordering (Revenue mode: weekday bar longer).
+    expect(ww.weekdayRevenue).toBeGreaterThan(ww.weekendRevenue)
+    // Daily Avg mode: weekend average per day is higher than weekday average.
+    expect(ww.averageWeekendRevenue).toBeGreaterThan(ww.averageWeekdayRevenue!)
+    // Observed-day counts.
+    expect(ww.weekdayCount).toBe(22)
+    expect(ww.weekendCount).toBe(9)
   })
 
   it('individual week totals sum to the January monthly total', async () => {
