@@ -8,6 +8,7 @@ import {
   mapHeaderToField,
   suggestColumnMapping,
   parseDateValue,
+  parseTimeValue,
   parseNumber,
   processRows,
 } from '@/lib/import'
@@ -181,9 +182,74 @@ describe('parseDateValue', () => {
     expect(result.date).toBeNull()
     expect(result.error).toBe('Missing date')
   })
+
+  it('parses JavaScript Date objects (SheetJS cellDates output)', () => {
+    const date = new Date(Date.UTC(2026, 0, 15)) // 2026-01-15
+    const result = parseDateValue(date)
+    expect(result.date).toBe('2026-01-15')
+    expect(result.error).toBeNull()
+  })
+
+  it('rejects invalid Date objects', () => {
+    const result = parseDateValue(new Date('invalid'))
+    expect(result.date).toBeNull()
+    expect(result.error).toBeTruthy()
+  })
 })
 
-describe('parseNumber', () => {
+describe('parseTimeValue', () => {
+  it('parses JavaScript Date objects', () => {
+    const date = new Date(Date.UTC(2026, 0, 15, 14, 30, 0))
+    const result = parseTimeValue(date)
+    expect(result.time).toBe('14:30')
+    expect(result.error).toBeNull()
+  })
+
+  it('parses Excel time serials (fraction of day)', () => {
+    // 0.5 = 12:00 PM (half of a day)
+    const result = parseTimeValue(0.5)
+    expect(result.time).toBe('12:00')
+    expect(result.error).toBeNull()
+  })
+
+  it('parses Excel time serial 0.25 (6:00 AM)', () => {
+    const result = parseTimeValue(0.25)
+    expect(result.time).toBe('06:00')
+    expect(result.error).toBeNull()
+  })
+
+  it('parses HH:mm strings', () => {
+    const result = parseTimeValue('14:30')
+    expect(result.time).toBe('14:30')
+    expect(result.error).toBeNull()
+  })
+
+  it('parses HH:mm:ss strings', () => {
+    const result = parseTimeValue('09:15:45')
+    expect(result.time).toBe('09:15')
+    expect(result.error).toBeNull()
+  })
+
+  it('rejects invalid times', () => {
+    const result = parseTimeValue('not-a-time')
+    expect(result.time).toBeNull()
+    expect(result.error).toBeTruthy()
+  })
+
+  it('rejects empty values', () => {
+    const result = parseTimeValue('')
+    expect(result.time).toBeNull()
+    expect(result.error).toBe('Missing time')
+  })
+
+  it('rejects out-of-range time serials', () => {
+    const result = parseTimeValue(1.5)
+    expect(result.time).toBeNull()
+    expect(result.error).toBeTruthy()
+  })
+})
+
+describe('processRows', () => {
   it('parses numbers', () => {
     const result = parseNumber(180)
     expect(result.number).toBe(180)
@@ -263,6 +329,27 @@ describe('processRows', () => {
     const preview = processRows(invalidRows, headers, mapping)
     expect(preview.rejectedCount).toBe(1)
     expect(preview.canImport).toBe(false)
+  })
+
+  it('processes rows with Date objects as date values (SheetJS cellDates output)', () => {
+    const rowsWithDateObjects = [
+      { 'Transaction ID': 'txn1', Date: new Date(Date.UTC(2024, 10, 4)), 'Item Name': 'Coffee', Qty: 2, 'Unit Price': 180, 'Total Amount': 360 },
+    ]
+    const preview = processRows(rowsWithDateObjects, headers, mapping)
+    expect(preview.acceptedCount).toBe(1)
+    expect(preview.allLines[0].date).toBe('2024-11-04')
+  })
+
+  it('processes rows with time serials as time values', () => {
+    const rowsWithTimeSerials = [
+      { 'Transaction ID': 'txn1', Date: '2024-11-04', 'Item Name': 'Coffee', Qty: 2, 'Unit Price': 180, 'Total Amount': 360, Time: 0.5 }, // 12:00 PM
+    ]
+    // Add Time to headers
+    const headersWithTime = [...headers, 'Time']
+    const mappingWithTime = { ...mapping, time: 'Time' }
+    const preview = processRows(rowsWithTimeSerials, headersWithTime, mappingWithTime)
+    expect(preview.acceptedCount).toBe(1)
+    expect(preview.allLines[0].time).toBe('12:00')
   })
 })
 

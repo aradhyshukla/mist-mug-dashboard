@@ -170,6 +170,16 @@ export function parseDateValue(value: unknown): { date: string | null; error: st
     return { date: null, error: 'Missing date' }
   }
 
+  // Handle JavaScript Date objects (produced by SheetJS cellDates: true)
+  if (value instanceof Date) {
+    const d = value
+    if (isNaN(d.getTime())) return { date: null, error: 'Invalid date' }
+    const y = d.getUTCFullYear()
+    const m = String(d.getUTCMonth() + 1).padStart(2, '0')
+    const day = String(d.getUTCDate()).padStart(2, '0')
+    return { date: `${y}-${m}-${day}`, error: null }
+  }
+
   if (typeof value === 'number') {
     const serialDate = excelSerialToDate(value)
     if (serialDate) return { date: serialDate, error: null }
@@ -216,6 +226,62 @@ export function parseDateValue(value: unknown): { date: string | null; error: st
   }
 
   return { date: null, error: 'Unrecognized date format' }
+}
+
+// ---------------------------------------------------------------
+// Time parsing
+// ---------------------------------------------------------------
+
+export function parseTimeValue(value: unknown): { time: string | null; error: string | null } {
+  if (value === null || value === undefined || value === '') {
+    return { time: null, error: 'Missing time' }
+  }
+
+  // Handle JavaScript Date objects (produced by SheetJS cellDates: true)
+  if (value instanceof Date) {
+    const d = value
+    if (isNaN(d.getTime())) return { time: null, error: 'Invalid time' }
+    const h = String(d.getUTCHours()).padStart(2, '0')
+    const min = String(d.getUTCMinutes()).padStart(2, '0')
+    return { time: `${h}:${min}`, error: null }
+  }
+
+  if (typeof value === 'number') {
+    // Excel time serial: fraction of a day (e.g., 0.5 = 12:00 PM)
+    const serial = value
+    if (isNaN(serial) || !isFinite(serial) || serial < 0 || serial >= 1) {
+      return { time: null, error: 'Invalid time serial' }
+    }
+    const totalMinutes = Math.round(serial * 24 * 60)
+    const h = Math.floor(totalMinutes / 60)
+    const min = totalMinutes % 60
+    return { time: `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`, error: null }
+  }
+
+  const str = String(value).trim()
+  // Try HH:mm:ss
+  const hmsMatch = str.match(/^(\d{1,2}):(\d{2}):(\d{2})$/)
+  if (hmsMatch) {
+    const h = parseInt(hmsMatch[1], 10)
+    const m = parseInt(hmsMatch[2], 10)
+    if (h >= 0 && h <= 23 && m >= 0 && m <= 59) {
+      return { time: `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`, error: null }
+    }
+    return { time: null, error: 'Invalid time format' }
+  }
+
+  // Try HH:mm
+  const hmMatch = str.match(/^(\d{1,2}):(\d{2})$/)
+  if (hmMatch) {
+    const h = parseInt(hmMatch[1], 10)
+    const m = parseInt(hmMatch[2], 10)
+    if (h >= 0 && h <= 23 && m >= 0 && m <= 59) {
+      return { time: `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`, error: null }
+    }
+    return { time: null, error: 'Invalid time format' }
+  }
+
+  return { time: null, error: 'Unrecognized time format' }
 }
 
 // ---------------------------------------------------------------
@@ -371,7 +437,7 @@ export function processRows(
     const unitPriceRaw = mapping.unitPrice ? row[mapping.unitPrice] : null
     const totalAmountRaw = mapping.totalAmount ? row[mapping.totalAmount] : null
     const dateRaw = mapping.date ? row[mapping.date] : null
-    const timeRaw = mapping.time ? String(row[mapping.time] ?? '').trim() : undefined
+    const timeRaw = mapping.time ? row[mapping.time] : undefined
 
     const lineIssues: ValidationIssue[] = []
 
@@ -387,6 +453,12 @@ export function processRows(
     const dateResult = parseDateValue(dateRaw)
     if (dateResult.error) {
       lineIssues.push({ row: rowNumber, field: 'date', message: dateResult.error, severity: 'error' })
+    }
+
+    // Parse time
+    const timeResult = parseTimeValue(timeRaw)
+    if (timeResult.error && mapping.time) {
+      lineIssues.push({ row: rowNumber, field: 'time', message: timeResult.error, severity: 'error' })
     }
 
     // Parse quantity
@@ -430,10 +502,10 @@ export function processRows(
       }
     }
 
-    // Composite key
+    // Composite key uses parsed date (ISO string) for consistency
     const compositeKey = lineId
       ? `${transactionId}|${lineId}`
-      : `${transactionId}|${itemName}|${dateRaw}`
+      : `${transactionId}|${itemName}|${dateResult.date ?? dateRaw}`
 
     const isDuplicate = seenCompositeKeys.has(compositeKey)
     if (isDuplicate) {
@@ -453,7 +525,7 @@ export function processRows(
       transactionId,
       lineId: lineId ?? undefined,
       date: dateResult.date ?? '',
-      time: timeRaw ?? undefined,
+      time: timeResult.time ?? undefined,
       itemName,
       categoryResolved: resolveCategory(row[mapping.category ?? ''] as string | undefined),
       quantity: quantityResult.number ?? 0,

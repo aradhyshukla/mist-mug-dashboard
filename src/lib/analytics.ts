@@ -58,7 +58,8 @@ function getDayOfWeek(dateStr: string): number {
 
 function getHour(timeStr?: string): number | null {
   if (!timeStr) return null
-  const match = String(timeStr).match(/^(\d{1,2})/)
+  // Match HH:mm or HH:mm:ss
+  const match = String(timeStr).match(/^(\d{1,2}):(\d{2})/)
   if (!match) return null
   const h = parseInt(match[1], 10)
   return h >= 0 && h <= 23 ? h : null
@@ -220,14 +221,14 @@ export async function computeHourlyData(
   const all = await fetchValidLines()
   const filtered = filterByDateRange(all, startDate, endDate)
 
-  const hourMap = new Map<number, { revenue: number; orders: number }>()
+  const hourMap = new Map<number, { revenue: number; orderIds: Set<string> }>()
 
   for (const line of filtered) {
     const hour = getHour(line.time)
     if (hour === null) continue
-    const existing = hourMap.get(hour) || { revenue: 0, orders: 0 }
+    const existing = hourMap.get(hour) || { revenue: 0, orderIds: new Set() }
     existing.revenue += line.lineTotalInr
-    existing.orders += 1
+    existing.orderIds.add(line.transactionId)
     hourMap.set(hour, existing)
   }
 
@@ -235,7 +236,7 @@ export async function computeHourlyData(
     .map(([hour, data]) => ({
       hour,
       revenueInr: Math.round(data.revenue * 100) / 100,
-      orderCount: data.orders,
+      orderCount: data.orderIds.size,
     }))
     .sort((a, b) => a.hour - b.hour)
 }
@@ -248,13 +249,13 @@ export async function computeRevenueByDayOfWeek(
   const filtered = filterByDateRange(all, startDate, endDate)
 
   const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-  const dayMap = new Map<number, { revenue: number; orders: number }>()
+  const dayMap = new Map<number, { revenue: number; orderIds: Set<string> }>()
 
   for (const line of filtered) {
     const day = getDayOfWeek(line.date)
-    const existing = dayMap.get(day) || { revenue: 0, orders: 0 }
+    const existing = dayMap.get(day) || { revenue: 0, orderIds: new Set() }
     existing.revenue += line.lineTotalInr
-    existing.orders += 1
+    existing.orderIds.add(line.transactionId)
     dayMap.set(day, existing)
   }
 
@@ -262,7 +263,7 @@ export async function computeRevenueByDayOfWeek(
     .map(([day, data]) => ({
       day: dayNames[day],
       revenueInr: Math.round(data.revenue * 100) / 100,
-      orderCount: data.orders,
+      orderCount: data.orderIds.size,
     }))
     .sort((a, b) => {
       const order = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -283,19 +284,19 @@ export async function computeWeekdayWeekend(
 
   let weekdayRevenue = 0
   let weekendRevenue = 0
-  let weekdayOrders = 0
-  let weekendOrders = 0
+  const weekdayOrderIds = new Set<string>()
+  const weekendOrderIds = new Set<string>()
   const weekdayDates = new Set<string>()
   const weekendDates = new Set<string>()
 
   for (const line of filtered) {
     if (isWeekday(line.date)) {
       weekdayRevenue += line.lineTotalInr
-      weekdayOrders += 1
+      weekdayOrderIds.add(line.transactionId)
       weekdayDates.add(line.date)
     } else {
       weekendRevenue += line.lineTotalInr
-      weekendOrders += 1
+      weekendOrderIds.add(line.transactionId)
       weekendDates.add(line.date)
     }
   }
@@ -315,8 +316,8 @@ export async function computeWeekdayWeekend(
   return {
     weekdayRevenue: Math.round(weekdayRevenue * 100) / 100,
     weekendRevenue: Math.round(weekendRevenue * 100) / 100,
-    weekdayOrderCount: weekdayOrders,
-    weekendOrderCount: weekendOrders,
+    weekdayOrderCount: weekdayOrderIds.size,
+    weekendOrderCount: weekendOrderIds.size,
     weekdayCount: weekdayCount,
     weekendCount: weekendCount,
     averageWeekdayRevenue: averageWeekdayRevenue
