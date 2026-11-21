@@ -1,14 +1,19 @@
 /**
- * Mist & Mug — Sales Analytics Page (Phase 2)
+ * Mist & Mug — Sales Analytics Page
  *
- * Real analytics computed from imported transaction data.
- * Time filters: Week | Month | Year | All Time
+ * Real analytics computed from imported transaction data, filtered by a
+ * hierarchical reporting period chosen through the shared
+ * ReportingPeriodNavigator.
+ *
+ * Selection and application are separate states: analytics only change after
+ * the user clicks Apply. All available periods are derived from actual
+ * imported transaction dates, never from the system clock.
  */
 
 import * as React from 'react'
 import { SectionHeader } from '@/components/common/EmptyState'
 import { EmptyState } from '@/components/common/EmptyState'
-import { Clock } from 'lucide-react'
+import { ReportingPeriodNavigator } from '@/components/common/ReportingPeriodNavigator'
 import {
   computeDashboardMetrics,
   computeTopProducts,
@@ -17,22 +22,26 @@ import {
   computeDailyTrend,
   computeCategoryPerformance,
 } from '@/lib/analytics'
+import { getAllImportLines } from '@/db'
+import { resolveSelection, type ResolvedPeriod } from '@/lib/reporting-periods'
+import { useReportingPeriodState } from '@/lib/useReportingPeriodState'
+import type { ProcessedLine } from '@/types'
 import { onDataChanged } from '@/lib/events'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Link } from 'react-router-dom'
 
-type TimePeriod = 'week' | 'month' | 'year' | 'all-time'
-
-const PERIODS: Array<{ value: TimePeriod; label: string }> = [
-  { value: 'week', label: 'Week' },
-  { value: 'month', label: 'Month' },
-  { value: 'year', label: 'Year' },
-  { value: 'all-time', label: 'All Time' },
-]
+const ANALYTICS_STORAGE_KEY = 'mistmug:analytics:appliedPeriod'
 
 export function SalesAnalytics() {
-  const [period, setPeriod] = React.useState<TimePeriod>('all-time')
+  const [lines, setLines] = React.useState<ProcessedLine[]>([])
   const [loading, setLoading] = React.useState(true)
+
+  const { applied, setApplied, clearApplied } = useReportingPeriodState({
+    storageKey: ANALYTICS_STORAGE_KEY,
+    lines,
+  })
+
   const [metrics, setMetrics] = React.useState<{
     revenueInr: number
     orderCount: number
@@ -46,26 +55,53 @@ export function SalesAnalytics() {
   const [categoryData, setCategoryData] = React.useState<Array<any>>([])
   const [hasData, setHasData] = React.useState(false)
 
-  React.useEffect(() => {
-    loadAnalytics()
-  }, [period])
+  const [range, setRange] = React.useState<ResolvedPeriod | null>(null)
 
-  // Recompute analytics when data changes (e.g., after upload deletion)
+  // Resolve the applied selection to an inclusive date range whenever it changes.
+  React.useEffect(() => {
+    let resolved: ResolvedPeriod | null = null
+    if (applied) {
+      resolved = resolveSelection(applied, lines) ?? null
+    }
+    setRange(resolved)
+  }, [applied, lines])
+
+  async function loadData() {
+    setLoading(true)
+    try {
+      const all = await getAllImportLines()
+      setLines(all)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  React.useEffect(() => {
+    loadData()
+  }, [])
+
+  // Recompute when data or applied range changes.
+  React.useEffect(() => {
+    if (!range) return
+    loadAnalytics()
+  }, [range])
+
+  // Recompute when data changes (e.g. after upload deletion).
   React.useEffect(() => {
     const unsubscribe = onDataChanged(() => {
-      loadAnalytics()
+      loadData()
     })
     return unsubscribe
   }, [])
 
   async function loadAnalytics() {
-    setLoading(true)
-    const m = await computeDashboardMetrics()
-    const tp = await computeTopProducts(undefined, undefined, 5)
-    const hd = await computeHourlyData()
-    const ww = await computeWeekdayWeekend()
-    const td = await computeDailyTrend()
-    const cd = await computeCategoryPerformance()
+    const { startDate: start, endDate: end } = range!
+    const m = await computeDashboardMetrics(start, end)
+    const tp = await computeTopProducts(start, end, 5)
+    const hd = await computeHourlyData(start, end)
+    const ww = await computeWeekdayWeekend(start, end)
+    const td = await computeDailyTrend(start, end)
+    const cd = await computeCategoryPerformance(start, end)
 
     setMetrics(m)
     setTopProducts(tp)
@@ -74,7 +110,6 @@ export function SalesAnalytics() {
     setTrendData(td)
     setCategoryData(cd)
     setHasData(m.orderCount > 0 || m.itemsSold > 0)
-    setLoading(false)
   }
 
   if (loading) {
@@ -85,32 +120,111 @@ export function SalesAnalytics() {
     )
   }
 
+  const hasAnyData = lines.some((l) => l.isValid && !l.isDuplicate && l.date)
+
+  // No sales data at all: empty state with path to Upload Data.
+  if (!hasAnyData) {
+    return (
+      <div className="space-y-8">
+        <SectionHeader
+          title="Sales Analytics"
+          description="Real analytics computed from imported sales data."
+          action={
+            <ReportingPeriodNavigator
+              lines={lines}
+              applied={null}
+              onApply={() => {}}
+              selectLabel="Select Period"
+            />
+          }
+        />
+        <EmptyState
+          title="No sales data yet"
+          description="Import sales files via Upload Data to populate analytics. All calculations use actual historical transaction prices."
+          action={
+            <Button asChild variant="brand" size="sm">
+              <Link to="/upload">Upload Data</Link>
+            </Button>
+          }
+        />
+      </div>
+    )
+  }
+
+  // No period applied yet: prompt the user to select one.
+  if (!applied) {
+    return (
+      <div className="space-y-8">
+        <SectionHeader
+          title="Sales Analytics"
+          description="Real analytics computed from imported sales data. Select a time period to filter results."
+          action={
+            <ReportingPeriodNavigator
+              lines={lines}
+              applied={null}
+              onApply={setApplied}
+              selectLabel="Select Period"
+            />
+          }
+        />
+        <div className="flex flex-col items-center justify-center text-center py-20">
+          <p className="text-rain text-sm font-medium">Select the time period you want to analyze.</p>
+        </div>
+      </div>
+    )
+  }
+
+  // Period applied: show it prominently above the analytics.
+  const resolved = range
   return (
     <div className="space-y-8">
       <SectionHeader
         title="Sales Analytics"
-        description="Real analytics computed from imported sales data. Select a time period to filter results."
+        description="Real analytics computed from imported sales data."
         action={
-          <div className="flex gap-2">
-            {PERIODS.map((p) => (
-              <Button
-                key={p.value}
-                variant={period === p.value ? 'brand' : 'outline'}
-                size="sm"
-                onClick={() => setPeriod(p.value)}
-              >
-                {p.label}
-              </Button>
-            ))}
-          </div>
+          <ReportingPeriodNavigator
+            lines={lines}
+            applied={applied}
+            onApply={setApplied}
+            selectLabel="Select Period"
+          />
         }
       />
 
+      {/* Applied period banner */}
+      {resolved && (
+        <div className="flex items-center justify-between px-0">
+          <div className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-[#d8e8dc]/60 border border-[#1e5e3a]/30 text-[#1e5e3a] text-sm font-medium">
+            <span>Analyzing:</span>
+            <span className="font-serif text-ink">{resolved.label}</span>
+            {resolved.startDate && resolved.endDate && (
+              <span className="text-rain/60 text-xs">
+                {resolved.startDate} → {resolved.endDate}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => clearApplied()}
+              className="text-rain/60 hover:text-rain"
+            >
+              Clear
+            </Button>
+          </div>
+        </div>
+      )}
+
       {!hasData ? (
         <EmptyState
-          title="No sales data yet"
-          description="Import sales files via Upload Data to populate analytics. All calculations use actual historical transaction prices."
-          icon={<Clock className="w-10 h-10 text-rain/30 mx-auto mb-3" />}
+          title="No data for this period"
+          description="No sales transactions were recorded in the selected period. Choose a different period."
+          action={
+            <Button variant="outline" size="sm" onClick={() => setApplied(null)}>
+              Choose another period
+            </Button>
+          }
         />
       ) : (
         <>
