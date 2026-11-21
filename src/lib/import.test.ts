@@ -973,6 +973,26 @@ describe('seedStarterCatalog (catalogue sync)', () => {
     expect(stored.some((p) => p.id === 'm01')).toBe(false)
   })
 
+  it('does not re-insert a website product whose id exists under a renamed name', async () => {
+    // Simulates a user-edited product: id 'm01' exists but was renamed away from
+    // 'Landour Latte'. bulkAdd must not try to re-add Landour Latte with id 'm01',
+    // which would throw a ConstraintError on the primary key.
+    const renamedProduct = makeProduct({
+      name: 'Mountain Brew',
+      source: 'user',
+      id: 'm01' as ProductId,
+      currentPriceInr: 250,
+    })
+    const { bulkAddSpy } = mockProductDb([renamedProduct])
+    await seedStarterCatalog()
+    // m01 is taken by the renamed product, so Landour Latte (id m01) is skipped.
+    const stored = bulkAddSpy.mock.calls[0][0]
+    expect(stored).toHaveLength(29)
+    expect(stored.some((p) => p.id === 'm01')).toBe(false)
+    // The renamed user product is not overwritten (no update call for m01).
+    expect(bulkAddSpy).toHaveBeenCalledTimes(1)
+  })
+
   it('maps website categories to dashboard categories correctly', async () => {
     const { bulkAddSpy } = mockProductDb([])
     await seedStarterCatalog()
