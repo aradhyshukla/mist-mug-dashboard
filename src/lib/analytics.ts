@@ -364,6 +364,80 @@ export async function computeDailyTrend(
     .sort((a, b) => a.date.localeCompare(b.date))
 }
 
+// ---------------------------------------------------------------
+// Monthly & Yearly trend buckets (for Revenue Trends grouping)
+//
+// Calendar month → daily; calendar year → monthly; All Time → yearly.
+// Each bucket reconciles: sum of bucket revenue = total revenue; sum of
+// bucket items = total items; orders count distinct transaction IDs.
+// ---------------------------------------------------------------
+
+export interface TrendBucket {
+  period: string // human-readable label
+  periodKey: string // sortable grouping key (YYYY-MM or YYYY)
+  revenueInr: number
+  orderCount: number
+  itemsSold: number
+}
+
+export async function computeMonthlyTrend(
+  startDate?: string,
+  endDate?: string
+): Promise<TrendBucket[]> {
+  const all = await fetchValidLines()
+  const filtered = filterByDateRange(all, startDate, endDate)
+
+  const monthMap = new Map<string, { revenue: number; items: number; orderIds: Set<string> }>()
+
+  for (const line of filtered) {
+    const key = getMonthKey(line.date)
+    const existing = monthMap.get(key) || { revenue: 0, items: 0, orderIds: new Set() }
+    existing.revenue += line.lineTotalInr
+    existing.items += line.quantity
+    existing.orderIds.add(line.transactionId)
+    monthMap.set(key, existing)
+  }
+
+  return Array.from(monthMap.entries())
+    .map(([key, data]) => ({
+      period: formatMonthLabel(key),
+      periodKey: key,
+      revenueInr: Math.round(data.revenue * 100) / 100,
+      orderCount: data.orderIds.size,
+      itemsSold: data.items,
+    }))
+    .sort((a, b) => a.periodKey.localeCompare(b.periodKey))
+}
+
+export async function computeYearlyTrend(
+  startDate?: string,
+  endDate?: string
+): Promise<TrendBucket[]> {
+  const all = await fetchValidLines()
+  const filtered = filterByDateRange(all, startDate, endDate)
+
+  const yearMap = new Map<number, { revenue: number; items: number; orderIds: Set<string> }>()
+
+  for (const line of filtered) {
+    const year = getYear(line.date)
+    const existing = yearMap.get(year) || { revenue: 0, items: 0, orderIds: new Set() }
+    existing.revenue += line.lineTotalInr
+    existing.items += line.quantity
+    existing.orderIds.add(line.transactionId)
+    yearMap.set(year, existing)
+  }
+
+  return Array.from(yearMap.entries())
+    .map(([year, data]) => ({
+      period: String(year),
+      periodKey: String(year),
+      revenueInr: Math.round(data.revenue * 100) / 100,
+      orderCount: data.orderIds.size,
+      itemsSold: data.items,
+    }))
+    .sort((a, b) => Number(a.periodKey) - Number(b.periodKey))
+}
+
 export async function computeWeeklyBreakdown(
   startDate?: string,
   endDate?: string

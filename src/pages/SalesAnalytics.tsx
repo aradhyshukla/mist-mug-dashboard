@@ -20,17 +20,22 @@ import {
   computeHourlyData,
   computeWeekdayWeekend,
   computeDailyTrend,
+  computeMonthlyTrend,
+  computeYearlyTrend,
   computeCategoryRevenue,
 } from '@/lib/analytics'
 import { getAllImportLines } from '@/db'
 import { resolveSelection, type ResolvedPeriod } from '@/lib/reporting-periods'
 import { useReportingPeriodState } from '@/lib/useReportingPeriodState'
 import type { ProcessedLine } from '@/types'
+import type { TrendBucket } from '@/lib/analytics'
 import { onDataChanged } from '@/lib/events'
+import { formatDate } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { WeekdayWeekendChart } from '@/components/analytics/WeekdayWeekendChart'
 import { TopSellingProducts } from '@/components/analytics/TopSellingProducts'
+import { RevenueTrends } from '@/components/analytics/RevenueTrends'
 import { Link } from 'react-router-dom'
 
 const ANALYTICS_STORAGE_KEY = 'mistmug:analytics:appliedPeriod'
@@ -56,6 +61,8 @@ export function SalesAnalytics() {
   const [trendData, setTrendData] = React.useState<Array<any>>([])
   const [categoryData, setCategoryData] = React.useState<Array<any>>([])
   const [hasData, setHasData] = React.useState(false)
+  const [granularity, setGranularity] = React.useState<'Daily' | 'Monthly' | 'Yearly'>('Daily')
+  const [periodRangeLabel, setPeriodRangeLabel] = React.useState('')
 
   const [range, setRange] = React.useState<ResolvedPeriod | null>(null)
 
@@ -102,7 +109,29 @@ export function SalesAnalytics() {
     const tp = await computeTopProducts(start, end, Infinity)
     const hd = await computeHourlyData(start, end)
     const ww = await computeWeekdayWeekend(start, end)
-    const td = await computeDailyTrend(start, end)
+
+    let granularity: 'Daily' | 'Monthly' | 'Yearly' = 'Daily'
+    let td: TrendBucket[]
+    switch (range!.selection.kind) {
+      case 'year':
+        granularity = 'Monthly'
+        td = await computeMonthlyTrend(start, end)
+        break
+      case 'all-time':
+        granularity = 'Yearly'
+        td = await computeYearlyTrend(start, end)
+        break
+      default:
+        granularity = 'Daily'
+        const daily = await computeDailyTrend(start, end)
+        td = daily.map((d) => ({
+          period: d.date,
+          periodKey: d.date,
+          revenueInr: d.revenueInr,
+          orderCount: d.orderCount,
+          itemsSold: d.itemsSold,
+        }))
+    }
     const cd = await computeCategoryRevenue(start, end)
 
     setMetrics(m)
@@ -111,6 +140,8 @@ export function SalesAnalytics() {
     setWeekdayWeekend(ww)
     setTrendData(td)
     setCategoryData(cd)
+    setGranularity(granularity)
+    setPeriodRangeLabel(`${formatDate(start)} – ${formatDate(end)}`)
     setHasData(m.orderCount > 0 || m.itemsSold > 0)
   }
 
@@ -310,37 +341,12 @@ export function SalesAnalytics() {
           </div>
 
           {/* Revenue Trends */}
-          <section className="card-premium p-6">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="font-serif text-lg text-ink">Revenue Trends</h3>
-            </div>
-            {trendData.length === 0 ? (
-              <EmptyState title="No trend data" description="No daily trend data available for this period." />
-            ) : (
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Period</TableHead>
-                      <TableHead>Revenue</TableHead>
-                      <TableHead>Orders</TableHead>
-                      <TableHead>Items</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {trendData.map((d: any, i: number) => (
-                      <TableRow key={i}>
-                        <TableCell className="text-sm font-medium text-ink">{d.date}</TableCell>
-                        <TableCell className="text-sm font-serif text-ink">₹{d.revenueInr}</TableCell>
-                        <TableCell className="text-sm text-ink">{d.orderCount}</TableCell>
-                        <TableCell className="text-sm text-ink">{d.itemsSold}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-          </section>
+          <RevenueTrends
+            trendData={trendData}
+            metrics={metrics ?? { revenueInr: 0, orderCount: 0, itemsSold: 0, averageOrderValue: 0 }}
+            periodRangeLabel={periodRangeLabel}
+            granularity={granularity}
+          />
 
           {/* Category Performance */}
           <section className="card-premium p-6">

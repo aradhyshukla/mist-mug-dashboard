@@ -25,6 +25,8 @@ import {
   computeRevenueByDayOfWeek,
   computeWeekdayWeekend,
   computeDailyTrend,
+  computeMonthlyTrend,
+  computeYearlyTrend,
   computeWeeklyBreakdown,
   computeMonthlyBreakdown,
   computeYearlyBreakdown,
@@ -277,6 +279,36 @@ describe('computeDailyTrend', () => {
     const nov4 = data.find((d) => d.date === '2024-11-04')!
     expect(nov4.revenueInr).toBe(930)
     expect(nov4.orderCount).toBe(2)
+  })
+})
+
+describe('computeMonthlyTrend', () => {
+  it('groups by month and reconciles with total revenue', async () => {
+    const data = await computeMonthlyTrend()
+    expect(data.length).toBe(1)
+    expect(data[0].periodKey).toBe('2024-11')
+    expect(data[0].revenueInr).toBe(1610)
+    expect(data[0].orderCount).toBe(5)
+    expect(data[0].itemsSold).toBe(10)
+
+    const sumRevenue = data.reduce((s, d) => s + d.revenueInr, 0)
+    const m = await computeDashboardMetrics()
+    expect(sumRevenue).toBe(m.revenueInr)
+    const sumItems = data.reduce((s, d) => s + d.itemsSold, 0)
+    expect(sumItems).toBe(m.itemsSold)
+  })
+})
+
+describe('computeYearlyTrend', () => {
+  it('groups by year and reconciles with total revenue', async () => {
+    const data = await computeYearlyTrend()
+    expect(data.length).toBe(1)
+    expect(data[0].periodKey).toBe('2024')
+    expect(data[0].revenueInr).toBe(1610)
+
+    const sumRevenue = data.reduce((s, d) => s + d.revenueInr, 0)
+    const m = await computeDashboardMetrics()
+    expect(sumRevenue).toBe(m.revenueInr)
   })
 })
 
