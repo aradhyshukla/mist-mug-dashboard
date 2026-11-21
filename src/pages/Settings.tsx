@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { emitDataChanged } from '@/lib/events'
 import { type Product } from '@/types'
 import {
   getSettings,
@@ -143,6 +144,9 @@ export function Settings() {
       }
       closeProductDialog()
       await loadProducts()
+      // Notify other pages (e.g. Sales Analytics) that catalogue data changed
+      // so category-based analytics recompute with the updated category.
+      emitDataChanged()
     } catch (err) {
       setProductError(
         err instanceof Error ? err.message : 'Failed to save product. Please try again.'

@@ -96,13 +96,17 @@ export function SalesAnalytics() {
     loadAnalytics()
   }, [range])
 
-  // Recompute when data changes (e.g. after upload deletion).
+  // Recompute when data changes (e.g. after upload deletion or product edit).
   React.useEffect(() => {
     const unsubscribe = onDataChanged(() => {
       loadData()
+      // Product edits don't change import lines, so the [range] effect won't
+      // re-fire. Explicitly recompute analytics so category reattribution takes
+      // effect immediately (e.g. after editing a product category).
+      if (range) loadAnalytics()
     })
     return unsubscribe
-  }, [])
+  }, [range])
 
   async function loadAnalytics() {
     const { startDate: start, endDate: end } = range!

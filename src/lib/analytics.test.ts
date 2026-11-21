@@ -556,6 +556,91 @@ describe('category attribution in analytics projections', () => {
     const m = await computeDashboardMetrics()
     expect(catTotal).toBe(m.revenueInr)
   })
+
+  it('category reattribution moves revenue from old category to new category', async () => {
+    // Initial state: Margherita Pizza is catalogued as Coffee
+    vi.mocked(getAllProducts).mockResolvedValue([
+      {
+        id: 'p-pizza' as ProductId,
+        name: 'Margherita Pizza',
+        category: 'Coffee',
+        currentPriceInr: 250,
+        isActive: true,
+        source: 'website',
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+      },
+    ])
+    vi.mocked(getAllImportLines).mockResolvedValue([
+      { ...FIXTURE_LINES[2], productId: 'p-pizza' as ProductId, productName: 'Margherita Pizza', categoryResolved: 'Coffee', lineTotalInr: 480, quantity: 3 },
+    ])
+
+    const before = await computeCategoryRevenue()
+    const coffeeBefore = before.find((c) => c.category === 'Coffee')!
+    expect(coffeeBefore.revenueInr).toBe(480)
+    expect(before.find((c) => c.category === 'Bakery')).toBeUndefined()
+
+    // After edit: Margherita Pizza is recatalogued as Bakery
+    vi.mocked(getAllProducts).mockResolvedValue([
+      {
+        id: 'p-pizza' as ProductId,
+        name: 'Margherita Pizza',
+        category: 'Bakery', // changed from Coffee to Bakery
+        currentPriceInr: 250,
+        isActive: true,
+        source: 'website',
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-02T00:00:00Z',
+      },
+    ])
+
+    const after = await computeCategoryRevenue()
+    const coffeeAfter = after.find((c) => c.category === 'Coffee')
+    const bakeryAfter = after.find((c) => c.category === 'Bakery')!
+    expect(coffeeAfter).toBeUndefined() // revenue moved out of Coffee
+    expect(bakeryAfter.revenueInr).toBe(480) // revenue moved into Bakery
+
+    // Total revenue unchanged
+    const afterTotal = after.reduce((s, c) => s + c.revenueInr, 0)
+    const beforeTotal = before.reduce((s, c) => s + c.revenueInr, 0)
+    expect(afterTotal).toBe(beforeTotal)
+  })
+
+  it('category reattribution preserves total revenue across reporting periods', async () => {
+    vi.mocked(getAllProducts).mockResolvedValue([
+      {
+        id: 'p-pizza' as ProductId,
+        name: 'Margherita Pizza',
+        category: 'Bakery',
+        currentPriceInr: 250,
+        isActive: true,
+        source: 'website',
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+      },
+    ])
+    vi.mocked(getAllImportLines).mockResolvedValue([
+      { ...FIXTURE_LINES[2], productId: 'p-pizza' as ProductId, productName: 'Margherita Pizza', categoryResolved: 'Coffee', lineTotalInr: 480, quantity: 3, date: '2026-01-15' },
+    ])
+
+    const cats = await computeCategoryRevenue('2026-01-01', '2026-01-31')
+    const catTotal = cats.reduce((s, c) => s + c.revenueInr, 0)
+    const m = await computeDashboardMetrics('2026-01-01', '2026-01-31')
+    expect(catTotal).toBe(m.revenueInr)
+    expect(m.revenueInr).toBe(480)
+  })
+
+  it('unmatched products are reported as Unclassified, never Coffee', async () => {
+    vi.mocked(getAllProducts).mockResolvedValue([])
+    vi.mocked(getAllImportLines).mockResolvedValue([
+      { ...FIXTURE_LINES[0], productName: 'Unknown Item', categoryResolved: 'Unknown Category' as ProductCategory },
+    ])
+    const data = await computeCategoryRevenue()
+    const unclassified = data.find((c) => c.category === 'Unclassified')
+    const coffee = data.find((c) => c.category === 'Coffee')
+    expect(unclassified?.revenueInr).toBe(360)
+    expect(coffee).toBeUndefined()
+  })
 })
 
 describe('computeRevenueByDayOfWeek', () => {

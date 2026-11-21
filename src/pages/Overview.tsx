@@ -9,7 +9,7 @@ import { Select } from '@/components/ui/select'
 import { Plus } from 'lucide-react'
 import { type Product } from '@/types'
 import { getAllProducts, createProduct, updateProduct, deactivateProduct, activateProduct, seedStarterCatalog } from '@/db'
-import { onDataChanged } from '@/lib/events'
+import { onDataChanged, emitDataChanged } from '@/lib/events'
 
 export const CATEGORIES = ['All', 'Coffee', 'Tea', 'Bakery', 'Cold Beverage', 'Signature', 'Merchandise'] as const
 
@@ -102,6 +102,9 @@ export function Overview() {
     setDialogOpen(false)
     const all = await getAllProducts()
     setProducts(all)
+    // Notify other pages (e.g. Sales Analytics) that catalogue data changed
+    // so category-based analytics recompute with the updated category.
+    emitDataChanged()
   }
 
   async function handleDeactivate(id: string) {
