@@ -207,30 +207,44 @@ describe('computeHourlyData', () => {
     expect(hour9.orderCount).toBe(1) // txn1 is 1 unique order (was 2 when counting lines)
   })
 
-  it('groups by hour with time serial values', async () => {
-    // txn1 line 1 at 12:00 PM (360 revenue), txn2 at 9:00 AM (480 revenue)
+  it('counts unique orders per hour, not lines', async () => {
     vi.mocked(getAllImportLines).mockResolvedValue([
-      { ...FIXTURE_LINES[0], time: '12:00' },
-      { ...FIXTURE_LINES[2], time: '09:00', transactionId: 'txn2', lineId: '2' },
+      { ...FIXTURE_LINES[0], transactionId: 'txn1', lineId: '1', date: '2024-11-04', time: '09:30', lineTotalInr: 360 },
+      { ...FIXTURE_LINES[1], transactionId: 'txn1', lineId: '2', date: '2024-11-04', time: '09:30', lineTotalInr: 90 },
+      { ...FIXTURE_LINES[2], transactionId: 'txn2', lineId: '1', date: '2024-11-04', time: '09:45', lineTotalInr: 480 },
     ])
     const data = await computeHourlyData()
     const hour9 = data.find((d) => d.hour === 9)!
-    const hour12 = data.find((d) => d.hour === 12)!
-    expect(hour9.revenueInr).toBe(480) // txn2
-    expect(hour9.orderCount).toBe(1)
-    expect(hour12.revenueInr).toBe(360) // txn1 line 1
-    expect(hour12.orderCount).toBe(1)
+    // 3 lines but 2 unique orders at hour 9
+    expect(hour9.revenueInr).toBe(930) // 360 + 90 + 480
+    expect(hour9.orderCount).toBe(2)
   })
 
-  it('groups by hour with time serial numbers', async () => {
-    // 0.5 = 12:00 PM (time serial converted to HH:mm)
+  it('ignores lines with missing or invalid time', async () => {
     vi.mocked(getAllImportLines).mockResolvedValue([
-      { ...FIXTURE_LINES[0], time: '12:00' },
+      { ...FIXTURE_LINES[0], time: '09:30' },
+      { ...FIXTURE_LINES[2], time: undefined },
+      { ...FIXTURE_LINES[4], time: 'not-a-time' },
     ])
     const data = await computeHourlyData()
-    const hour12 = data.find((d) => d.hour === 12)!
-    expect(hour12.revenueInr).toBe(360)
-    expect(hour12.orderCount).toBe(1)
+    expect(data).toHaveLength(1)
+    expect(data[0].hour).toBe(9)
+  })
+
+  it('returns empty array for no data', async () => {
+    vi.mocked(getAllImportLines).mockResolvedValue([])
+    const data = await computeHourlyData()
+    expect(data).toEqual([])
+  })
+
+  it('chronologically orders hours', async () => {
+    vi.mocked(getAllImportLines).mockResolvedValue([
+      { ...FIXTURE_LINES[2], time: '14:15' },
+      { ...FIXTURE_LINES[0], time: '09:30' },
+      { ...FIXTURE_LINES[4], time: '08:00' },
+    ])
+    const data = await computeHourlyData()
+    expect(data.map((d) => d.hour)).toEqual([8, 9, 14])
   })
 })
 

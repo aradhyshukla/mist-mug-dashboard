@@ -32,11 +32,11 @@ import type { TrendBucket } from '@/lib/analytics'
 import { onDataChanged } from '@/lib/events'
 import { formatDate } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { WeekdayWeekendChart } from '@/components/analytics/WeekdayWeekendChart'
 import { TopSellingProducts } from '@/components/analytics/TopSellingProducts'
 import { RevenueTrends } from '@/components/analytics/RevenueTrends'
 import { CategoryRevenueDonut } from '@/components/analytics/CategoryRevenueDonut'
+import { BusiestHoursChart } from '@/components/analytics/BusiestHoursChart'
 import { Link } from 'react-router-dom'
 
 const ANALYTICS_STORAGE_KEY = 'mistmug:analytics:appliedPeriod'
@@ -356,36 +356,8 @@ export function SalesAnalytics() {
             subtitle="Revenue distribution by product category"
           />
 
-          {/* Hourly Data */}
-          <section className="card-premium p-6">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="font-serif text-lg text-ink">Busiest Hours</h3>
-            </div>
-            {hourlyData.length === 0 ? (
-              <EmptyState title="No hourly data" description="No hourly data available (time not recorded in upload)." />
-            ) : (
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Hour</TableHead>
-                      <TableHead>Revenue</TableHead>
-                      <TableHead>Orders</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {hourlyData.map((h: any, i: number) => (
-                      <TableRow key={i}>
-                        <TableCell className="text-sm font-medium text-ink">{h.hour}:00</TableCell>
-                        <TableCell className="text-sm font-serif text-ink">₹{h.revenueInr}</TableCell>
-                        <TableCell className="text-sm text-ink">{h.orderCount}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-          </section>
+          {/* Busiest Hours */}
+          <BusiestHoursChart data={hourlyData} />
         </>
       )}
     </div>
