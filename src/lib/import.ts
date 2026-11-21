@@ -324,9 +324,9 @@ const CATEGORY_ALIASES: Record<string, ProductCategory> = {
 }
 
 export function resolveCategory(value: string | undefined): ProductCategory {
-  if (!value) return 'Coffee'
+  if (!value) return 'Unclassified'
   const normalized = normalizeHeader(value)
-  return CATEGORY_ALIASES[normalized] ?? 'Coffee'
+  return CATEGORY_ALIASES[normalized] ?? 'Unclassified'
 }
 
 // ---------------------------------------------------------------

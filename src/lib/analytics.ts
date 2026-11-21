@@ -13,6 +13,8 @@ import type {
   YearlyData,
   ProductPerformance,
   ProductCategory,
+  ProductId,
+  Product,
   CategoryPerformance,
   HourlyData,
   DailyData,
@@ -25,7 +27,7 @@ import type {
   PeriodComparison,
 } from '@/types'
 
-import { getAllImportLines } from '@/db'
+import { getAllImportLines, getAllProducts } from '@/db'
 
 // ---------------------------------------------------------------
 // Helpers
@@ -137,6 +139,7 @@ export async function computeTopProducts(
 ): Promise<ProductPerformance[]> {
   const all = await fetchValidLines()
   const filtered = filterByDateRange(all, startDate, endDate)
+  const lookup = await buildProductLookup()
 
   const productMap = new Map<string, ProductPerformance>()
 
@@ -151,7 +154,7 @@ export async function computeTopProducts(
       productMap.set(key, {
         productId: line.productId,
         productName: line.productName,
-        category: line.categoryResolved,
+        category: resolveLineCategory(line, lookup),
         quantitySold: line.quantity,
         revenueInr: line.lineTotalInr,
         averageSellingPrice: line.quantity > 0 ? line.lineTotalInr / line.quantity : 0,
@@ -178,6 +181,7 @@ export async function computeTopProductsByQuantity(
 ): Promise<ProductPerformance[]> {
   const all = await fetchValidLines()
   const filtered = filterByDateRange(all, startDate, endDate)
+  const lookup = await buildProductLookup()
 
   const productMap = new Map<string, ProductPerformance>()
 
@@ -191,7 +195,7 @@ export async function computeTopProductsByQuantity(
       productMap.set(key, {
         productId: line.productId,
         productName: line.productName,
-        category: line.categoryResolved,
+        category: resolveLineCategory(line, lookup),
         quantitySold: line.quantity,
         revenueInr: line.lineTotalInr,
         averageSellingPrice: line.quantity > 0 ? line.lineTotalInr / line.quantity : 0,
@@ -611,6 +615,67 @@ export interface CategoryRevenue {
   productCount: number;
 }
 
+// ---------------------------------------------------------------
+// Centralized category resolution
+//
+// Single source of truth for attributing a transaction line to a category.
+// Precedence:
+//   1. Verified product ID → catalogue category
+//   2. Verified normalized exact product-name match
+//   3. Reliable source transaction category (must be a verified category)
+//   4. 'Unclassified' (never defaults to Coffee)
+//
+// Historical records are never modified; attribution is corrected in the
+// analytics projection only.
+// ---------------------------------------------------------------
+
+function normalizeCategoryName(name: string): string {
+  return name
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/[_\s]+/g, ' ')
+    .replace(/[^\w\s]/g, '')
+    .trim()
+}
+
+interface ProductLookup {
+  byId: Map<ProductId, Product>
+  byName: Map<string, ProductCategory>
+}
+
+async function buildProductLookup(): Promise<ProductLookup> {
+  const products = await getAllProducts()
+  const byId = new Map<ProductId, Product>()
+  const byName = new Map<string, ProductCategory>()
+  for (const product of products) {
+    byId.set(product.id, product)
+    byName.set(normalizeCategoryName(product.name), product.category)
+  }
+  return { byId, byName }
+}
+
+export function resolveLineCategory(
+  line: ProcessedLine,
+  lookup: ProductLookup
+): ProductCategory {
+  // 1. Verified product ID → catalogue category.
+  if (line.productId && lookup.byId.has(line.productId)) {
+    return lookup.byId.get(line.productId)!.category
+  }
+  // 2. Verified normalized exact product-name match.
+  const normalized = normalizeCategoryName(line.productName)
+  if (lookup.byName.has(normalized)) {
+    return lookup.byName.get(normalized)!
+  }
+  // 3. Reliable source transaction category (only if verified).
+  if (VERIFIED_CATEGORIES.has(line.categoryResolved)) {
+    return line.categoryResolved
+  }
+  // 4. Unclassified — never fall back to Coffee.
+  return 'Unclassified'
+}
+
 export async function computeCategoryRevenue(
   startDate?: string,
   endDate?: string
@@ -618,12 +683,12 @@ export async function computeCategoryRevenue(
   const all = await fetchValidLines();
   const filtered = filterByDateRange(all, startDate, endDate);
 
+  const lookup = await buildProductLookup();
+
   const catMap = new Map<string, { revenue: number; quantity: number; products: Set<string> }>();
 
   for (const line of filtered) {
-    const category = VERIFIED_CATEGORIES.has(line.categoryResolved)
-      ? line.categoryResolved
-      : 'Unclassified';
+    const category = resolveLineCategory(line, lookup);
     const existing = catMap.get(category) || { revenue: 0, quantity: 0, products: new Set() };
     existing.revenue += line.lineTotalInr;
     existing.quantity += line.quantity;

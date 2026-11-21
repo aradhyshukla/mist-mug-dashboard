@@ -13,10 +13,11 @@ vi.mock('@/db', () => ({
     },
   },
   getAllImportLines: vi.fn(),
+  getAllProducts: vi.fn(),
 }))
 
-import { getAllImportLines } from '@/db'
-import type { ProcessedLine, ProductCategory } from '@/types'
+import { getAllImportLines, getAllProducts } from '@/db'
+import type { ProcessedLine, Product, ProductCategory, ProductId } from '@/types'
 import {
   computeDashboardMetrics,
   computeTopProducts,
@@ -32,6 +33,7 @@ import {
   computeYearlyBreakdown,
   computeCategoryPerformance,
   computeCategoryRevenue,
+  resolveLineCategory,
 } from '@/lib/analytics'
 
 // Test fixtures with known expected totals
@@ -136,6 +138,7 @@ const FIXTURE_LINES: ProcessedLine[] = [
 
 beforeEach(() => {
   vi.mocked(getAllImportLines).mockResolvedValue(FIXTURE_LINES)
+  vi.mocked(getAllProducts).mockResolvedValue([])
 })
 
 describe('computeDashboardMetrics', () => {
@@ -401,6 +404,157 @@ describe('computeCategoryRevenue', () => {
     const total = data.reduce((s, c) => s + c.revenueInr, 0)
     const pctSum = data.reduce((s, c) => s + (total > 0 ? (c.revenueInr / total) * 100 : 0), 0)
     expect(Math.round(pctSum)).toBe(100)
+  })
+})
+
+describe('resolveLineCategory', () => {
+  const baseLine: ProcessedLine = {
+    ...FIXTURE_LINES[0],
+    productId: 'p1' as ProductId,
+    productName: 'Landour Latte',
+    categoryResolved: 'Coffee',
+  }
+
+  const products: Product[] = [
+    {
+      id: 'p1' as ProductId,
+      name: 'Landour Latte',
+      category: 'Coffee',
+      currentPriceInr: 220,
+      isActive: true,
+      source: 'website',
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+    },
+    {
+      id: 'p2' as ProductId,
+      name: 'Almond Croissant',
+      category: 'Bakery',
+      currentPriceInr: 160,
+      isActive: true,
+      source: 'website',
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+    },
+  ]
+
+  function lookupFor(products: Product[]) {
+    const byId = new Map<ProductId, Product>()
+    const byName = new Map<string, ProductCategory>()
+    for (const p of products) {
+      byId.set(p.id, p)
+      byName.set(
+        p.name.toString().trim().toLowerCase().replace(/[_\s]+/g, ' ').replace(/[^\w\s]/g, '').trim(),
+        p.category
+      )
+    }
+    return { byId, byName }
+  }
+
+  it('uses verified product ID → catalogue category', () => {
+    const category = resolveLineCategory(baseLine, lookupFor(products))
+    expect(category).toBe('Coffee')
+  })
+
+  it('uses verified normalized exact product-name match when productId absent', () => {
+    const line = { ...baseLine, productId: undefined, productName: '  ALMOND Croissant  ' }
+    const category = resolveLineCategory(line, lookupFor(products))
+    expect(category).toBe('Bakery')
+  })
+
+  it('falls back to verified source transaction category', () => {
+    const line = {
+      ...baseLine,
+      productId: undefined,
+      productName: 'Unknown Item',
+      categoryResolved: 'Tea',
+    }
+    const category = resolveLineCategory(line, lookupFor(products))
+    expect(category).toBe('Tea')
+  })
+
+  it('reports unknown/unverified source categories as Unclassified, never Coffee', () => {
+    const line = {
+      ...baseLine,
+      productId: undefined,
+      productName: 'Mystery Item',
+      categoryResolved: 'Unknown Category' as ProductCategory,
+    }
+    const category = resolveLineCategory(line, lookupFor([]))
+    expect(category).toBe('Unclassified')
+  })
+})
+
+describe('category attribution in analytics projections', () => {
+  it('computeTopProducts uses catalogue category, not incorrect stored Coffee', async () => {
+    vi.mocked(getAllProducts).mockResolvedValue([
+      {
+        id: 'p-margherita' as ProductId,
+        name: 'Margherita Pizza',
+        category: 'Bakery',
+        currentPriceInr: 250,
+        isActive: true,
+        source: 'website',
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+      },
+    ])
+    vi.mocked(getAllImportLines).mockResolvedValue([
+      {
+        ...FIXTURE_LINES[2],
+        productId: 'p-margherita' as ProductId,
+        productName: 'Margherita Pizza',
+        categoryResolved: 'Coffee', // incorrectly stored as Coffee
+        lineTotalInr: 480,
+        quantity: 3,
+      },
+    ])
+    const products = await computeTopProducts()
+    const pizza = products.find((p) => p.productName === 'Margherita Pizza')!
+    expect(pizza.category).toBe('Bakery')
+    expect(pizza.category).not.toBe('Coffee')
+  })
+
+  it('computeCategoryRevenue does not misattribute catalogue products to Coffee', async () => {
+    vi.mocked(getAllProducts).mockResolvedValue([
+      {
+        id: 'p-cake' as ProductId,
+        name: 'Chocolate Cake',
+        category: 'Bakery',
+        currentPriceInr: 250,
+        isActive: true,
+        source: 'website',
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+      },
+    ])
+    vi.mocked(getAllImportLines).mockResolvedValue([
+      { ...FIXTURE_LINES[0], productId: 'p-cake' as ProductId, productName: 'Chocolate Cake', categoryResolved: 'Coffee' },
+    ])
+    const data = await computeCategoryRevenue()
+    const bakery = data.find((c) => c.category === 'Bakery')
+    const coffee = data.find((c) => c.category === 'Coffee')
+    expect(bakery?.revenueInr).toBe(360) // catalogue overrides incorrect stored Coffee
+    expect(coffee).toBeUndefined()
+  })
+
+  it('computeCategoryRevenue reports unverified source categories as Unclassified, never Coffee', async () => {
+    vi.mocked(getAllProducts).mockResolvedValue([])
+    vi.mocked(getAllImportLines).mockResolvedValue([
+      { ...FIXTURE_LINES[0], productName: 'Mystery Item', categoryResolved: 'Unknown Category' as ProductCategory },
+    ])
+    const data = await computeCategoryRevenue()
+    const unclassified = data.find((c) => c.category === 'Unclassified')
+    const coffee = data.find((c) => c.category === 'Coffee')
+    expect(unclassified?.revenueInr).toBe(360)
+    expect(coffee).toBeUndefined()
+  })
+
+  it('category totals reconcile with overall revenue', async () => {
+    const cats = await computeCategoryRevenue()
+    const catTotal = cats.reduce((s, c) => s + c.revenueInr, 0)
+    const m = await computeDashboardMetrics()
+    expect(catTotal).toBe(m.revenueInr)
   })
 })
 
