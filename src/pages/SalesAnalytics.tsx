@@ -36,6 +36,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { WeekdayWeekendChart } from '@/components/analytics/WeekdayWeekendChart'
 import { TopSellingProducts } from '@/components/analytics/TopSellingProducts'
 import { RevenueTrends } from '@/components/analytics/RevenueTrends'
+import { CategoryRevenueDonut } from '@/components/analytics/CategoryRevenueDonut'
 import { Link } from 'react-router-dom'
 
 const ANALYTICS_STORAGE_KEY = 'mistmug:analytics:appliedPeriod'
@@ -349,37 +350,11 @@ export function SalesAnalytics() {
           />
 
           {/* Category Performance */}
-          <section className="card-premium p-6">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="font-serif text-lg text-ink">Category Performance</h3>
-            </div>
-            {categoryData.length === 0 ? (
-              <EmptyState title="No category data" description="No category data available for this period." />
-            ) : (
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Category</TableHead>
-                      <TableHead>Revenue</TableHead>
-                      <TableHead>Qty Sold</TableHead>
-                      <TableHead>Products</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {categoryData.map((c: any, i: number) => (
-                      <TableRow key={i}>
-                        <TableCell className="text-sm font-medium text-ink">{c.category}</TableCell>
-                        <TableCell className="text-sm font-serif text-ink">₹{c.revenueInr}</TableCell>
-                        <TableCell className="text-sm text-ink">{c.quantitySold}</TableCell>
-                        <TableCell className="text-sm text-ink">{c.productCount}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-          </section>
+          <CategoryRevenueDonut
+            data={categoryData}
+            title="Category Performance"
+            subtitle="Revenue distribution by product category"
+          />
 
           {/* Hourly Data */}
           <section className="card-premium p-6">

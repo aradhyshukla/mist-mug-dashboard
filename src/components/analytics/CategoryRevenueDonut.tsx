@@ -27,6 +27,7 @@ interface CategoryRevenueEntry {
 interface CategoryRevenueDonutProps {
   data: CategoryRevenueEntry[]
   title?: string
+  subtitle?: string
   showCenterTotal?: boolean
 }
 
@@ -49,6 +50,7 @@ function colorFor(category: string, index: number): string {
 export function CategoryRevenueDonut({
   data,
   title,
+  subtitle,
   showCenterTotal = true,
 }: CategoryRevenueDonutProps) {
   const total = React.useMemo(() => data.reduce((sum, d) => sum + d.revenueInr, 0), [data])
@@ -68,6 +70,7 @@ export function CategoryRevenueDonut({
     return (
       <section className="card-premium p-6">
         {title && <h3 className="font-serif text-lg text-ink mb-4">{title}</h3>}
+        {subtitle && <p className="text-sm text-rain/60 mb-4">{subtitle}</p>}
         <p className="text-sm text-rain/60">No category revenue data for the selected period.</p>
       </section>
     )
@@ -76,6 +79,7 @@ export function CategoryRevenueDonut({
   return (
     <section className="card-premium p-6">
       {title && <h3 className="font-serif text-lg text-ink mb-4">{title}</h3>}
+      {subtitle && <p className="text-sm text-rain/60 mb-4">{subtitle}</p>}
       <div className="flex flex-col lg:flex-row gap-8 items-start">
         {/* Donut chart */}
         <div className="relative w-full max-w-xs h-64 shrink-0">

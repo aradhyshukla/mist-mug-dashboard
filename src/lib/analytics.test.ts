@@ -381,6 +381,13 @@ describe('computeCategoryRevenue', () => {
     const data = await computeCategoryRevenue()
     expect(data).toEqual([])
   })
+
+  it('donut percentages sum to 100%', async () => {
+    const data = await computeCategoryRevenue()
+    const total = data.reduce((s, c) => s + c.revenueInr, 0)
+    const pctSum = data.reduce((s, c) => s + (total > 0 ? (c.revenueInr / total) * 100 : 0), 0)
+    expect(Math.round(pctSum)).toBe(100)
+  })
 })
 
 describe('computeRevenueByDayOfWeek', () => {
