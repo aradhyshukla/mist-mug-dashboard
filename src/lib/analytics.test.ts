@@ -16,7 +16,7 @@ vi.mock('@/db', () => ({
 }))
 
 import { getAllImportLines } from '@/db'
-import { ProcessedLine } from '@/types'
+import type { ProcessedLine, ProductCategory } from '@/types'
 import {
   computeDashboardMetrics,
   computeTopProducts,
@@ -169,6 +169,23 @@ describe('computeTopProducts', () => {
     expect(croissant.quantitySold).toBe(3)
     expect(products[0].productName).toBe('Almond Croissant')
   })
+
+  it('returns only the top five when limit is five', async () => {
+    const products = await computeTopProducts(undefined, undefined, 5)
+    expect(products).toHaveLength(5)
+    const revenues = products.map((p) => p.revenueInr)
+    expect(revenues).toEqual([...revenues].sort((a, b) => b - a))
+  })
+
+  it('breaks revenue ties deterministically by product name', async () => {
+    vi.mocked(getAllImportLines).mockResolvedValue([
+      { ...FIXTURE_LINES[2], productName: 'Zebra Product', lineTotalInr: 480 },
+      { ...FIXTURE_LINES[4], productName: 'Apple Product', lineTotalInr: 480, quantity: 1 },
+    ])
+    const products = await computeTopProducts(undefined, undefined, 10)
+    expect(products[0].productName).toBe('Apple Product')
+    expect(products[1].productName).toBe('Zebra Product')
+  })
 })
 
 describe('computeTopProductsByQuantity', () => {
@@ -310,7 +327,7 @@ describe('computeCategoryRevenue', () => {
   it('reports unknown categories as Unclassified instead of Coffee', async () => {
     vi.mocked(getAllImportLines).mockResolvedValue([
       { ...FIXTURE_LINES[0], categoryResolved: 'Coffee' },
-      { ...FIXTURE_LINES[1], categoryResolved: 'Unknown Category' },
+      { ...FIXTURE_LINES[1], categoryResolved: 'Unknown Category' as ProductCategory },
     ])
     const data = await computeCategoryRevenue()
     const coffee = data.find((c) => c.category === 'Coffee')!

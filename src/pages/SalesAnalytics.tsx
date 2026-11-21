@@ -20,7 +20,7 @@ import {
   computeHourlyData,
   computeWeekdayWeekend,
   computeDailyTrend,
-  computeCategoryPerformance,
+  computeCategoryRevenue,
 } from '@/lib/analytics'
 import { getAllImportLines } from '@/db'
 import { resolveSelection, type ResolvedPeriod } from '@/lib/reporting-periods'
@@ -30,6 +30,7 @@ import { onDataChanged } from '@/lib/events'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { WeekdayWeekendChart } from '@/components/analytics/WeekdayWeekendChart'
+import { TopSellingProducts } from '@/components/analytics/TopSellingProducts'
 import { Link } from 'react-router-dom'
 
 const ANALYTICS_STORAGE_KEY = 'mistmug:analytics:appliedPeriod'
@@ -98,11 +99,11 @@ export function SalesAnalytics() {
   async function loadAnalytics() {
     const { startDate: start, endDate: end } = range!
     const m = await computeDashboardMetrics(start, end)
-    const tp = await computeTopProducts(start, end, 5)
+    const tp = await computeTopProducts(start, end, Infinity)
     const hd = await computeHourlyData(start, end)
     const ww = await computeWeekdayWeekend(start, end)
     const td = await computeDailyTrend(start, end)
-    const cd = await computeCategoryPerformance(start, end)
+    const cd = await computeCategoryRevenue(start, end)
 
     setMetrics(m)
     setTopProducts(tp)
@@ -259,42 +260,7 @@ export function SalesAnalytics() {
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Top-Selling Products */}
-            <section className="card-premium p-6 lg:col-span-2">
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="font-serif text-lg text-ink">Top-Selling Products</h3>
-                <Button variant="outline" size="sm" onClick={() => setTopProducts([])}>
-                  View by Quantity
-                </Button>
-              </div>
-              {topProducts.length === 0 ? (
-                <EmptyState title="No products" description="No product data available for this period." />
-              ) : (
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Product</TableHead>
-                        <TableHead>Category</TableHead>
-                        <TableHead>Revenue</TableHead>
-                        <TableHead>Qty Sold</TableHead>
-                        <TableHead>Avg Price</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {topProducts.map((p: any, i: number) => (
-                        <TableRow key={i}>
-                          <TableCell className="text-sm font-medium text-ink">{p.productName}</TableCell>
-                          <TableCell className="text-sm text-rain/60">{p.category}</TableCell>
-                          <TableCell className="text-sm font-serif text-ink">₹{p.revenueInr}</TableCell>
-                          <TableCell className="text-sm text-ink">{p.quantitySold}</TableCell>
-                          <TableCell className="text-sm text-ink">₹{Math.round(p.averageSellingPrice)}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
-            </section>
+            <TopSellingProducts products={topProducts} categoryRevenue={categoryData} />
 
             {/* Weekday vs Weekend */}
             <WeekdayWeekendChart data={weekdayWeekend} />

@@ -167,7 +167,7 @@ export async function computeTopProducts(
   }))
 
   return result
-    .sort((a, b) => b.revenueInr - a.revenueInr)
+    .sort((a, b) => b.revenueInr - a.revenueInr || a.productName.localeCompare(b.productName))
     .slice(0, limit)
 }
 
@@ -516,6 +516,19 @@ export const VERIFIED_CATEGORIES: ReadonlySet<string> = new Set([
   'Signature',
   'Merchandise',
 ]);
+
+// Shared category color map used by both category donut charts (Preferences 2 & 4).
+// Matches the Mist & Mug light café palette. Unknown/unresolved categories fall
+// back to the Unclassified swatch rather than being misassigned to Coffee.
+export const CATEGORY_COLORS: Record<string, string> = {
+  Coffee: '#142E25',        // deep forest green
+  Tea: '#6E422B',           // wood
+  Bakery: '#A6533F',        // muted terracotta / brick
+  'Cold Beverage': '#2a4a3c', // softer forest
+  Signature: '#8a2f1d',     // deep earth
+  Merchandise: '#a28b5a',   // muted gold
+  Unclassified: '#9aa7a1',  // muted rain
+};
 
 export interface CategoryRevenue {
   category: string;
