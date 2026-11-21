@@ -291,15 +291,11 @@ describe('getPreviousPeriod', () => {
     })
   })
 
-  it('month → preceding calendar month (January → December prior year)', () => {
-    expect(getPreviousPeriod({ kind: 'month', year: 2026, month: 1 } as ReportingPeriodSelection)).toEqual({
-      kind: 'month',
-      year: 2025,
-      month: 12,
-    })
+  it('month → January has no previous month within the selected year', () => {
+    expect(getPreviousPeriod({ kind: 'month', year: 2026, month: 1 } as ReportingPeriodSelection)).toBeNull()
   })
 
-  it('month → preceding calendar month (normal)', () => {
+  it('month → preceding calendar month within the same year', () => {
     expect(getPreviousPeriod({ kind: 'month', year: 2026, month: 3 } as ReportingPeriodSelection)).toEqual({
       kind: 'month',
       year: 2026,
@@ -307,17 +303,115 @@ describe('getPreviousPeriod', () => {
     })
   })
 
-  it('week → preceding comparable calendar-week segment', () => {
+  it('month → February precedes March within the same year', () => {
+    expect(getPreviousPeriod({ kind: 'month', year: 2026, month: 2 } as ReportingPeriodSelection)).toEqual({
+      kind: 'month',
+      year: 2026,
+      month: 1,
+    })
+  })
+
+  it('week → preceding week within the same month', () => {
     expect(getPreviousPeriod({ kind: 'week', year: 2026, month: 3, weekIndex: 2 } as ReportingPeriodSelection)).toEqual({
       kind: 'week',
       year: 2026,
-      month: 2,
-      weekIndex: 2,
+      month: 3,
+      weekIndex: 1,
     })
+  })
+
+  it('week → Week 1 has no previous week within the selected month', () => {
+    expect(
+      getPreviousPeriod({ kind: 'week', year: 2026, month: 3, weekIndex: 1 } as ReportingPeriodSelection)
+    ).toBeNull()
   })
 
   it('all-time → null (no previous period)', () => {
     expect(getPreviousPeriod({ kind: 'all-time' } as ReportingPeriodSelection)).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------
+// Previous-period resolution (same-hierarchy comparisons)
+// ---------------------------------------------------------------
+
+describe('previous-period resolution', () => {
+  const prevLines = [
+    line({ transactionId: 'y27', date: '2027-03-15' }),
+    line({ transactionId: 'y26', date: '2026-03-10' }),
+    line({ transactionId: 'm27-03', date: '2027-03-15' }),
+    line({ transactionId: 'm27-02', date: '2027-02-10' }),
+    line({ transactionId: 'm27-01', date: '2027-01-20' }),
+    // March 2027: Week 1 = Mar 1-7, Week 2 = Mar 8-14, Week 3 = Mar 15-21
+    line({ transactionId: 'w27-03-w1', date: '2027-03-03' }),
+    line({ transactionId: 'w27-03-w2', date: '2027-03-10' }),
+    line({ transactionId: 'w27-03-w3', date: '2027-03-18' }),
+  ]
+
+  it('Year 2027 → previous year 2026 (full year)', () => {
+    const prev = getPreviousPeriod({ kind: 'year', year: 2027 } as ReportingPeriodSelection)
+    expect(prev).toEqual({ kind: 'year', year: 2026 })
+    const resolved = resolveSelection(prev!, prevLines)
+    expect(resolved!.startDate).toBe('2026-01-01')
+    expect(resolved!.endDate).toBe('2026-12-31')
+    expect(resolved!.label).toBe('2026')
+  })
+
+  it('Year with no preceding-year data resolves to null', () => {
+    const prev = getPreviousPeriod({ kind: 'year', year: 2026 } as ReportingPeriodSelection)
+    expect(prev).toEqual({ kind: 'year', year: 2025 })
+    expect(resolveSelection(prev!, prevLines)).toBeNull()
+  })
+
+  it('March 2027 → previous month February 2027 (same year)', () => {
+    const prev = getPreviousPeriod({ kind: 'month', year: 2027, month: 3 } as ReportingPeriodSelection)
+    expect(prev).toEqual({ kind: 'month', year: 2027, month: 2 })
+    const resolved = resolveSelection(prev!, prevLines)
+    expect(resolved!.startDate).toBe('2027-02-01')
+    expect(resolved!.endDate).toBe('2027-02-28')
+    expect(resolved!.label).toBe('Feb 2027')
+  })
+
+  it('January 2027 → no previous month within the selected year', () => {
+    const prev = getPreviousPeriod({ kind: 'month', year: 2027, month: 1 } as ReportingPeriodSelection)
+    expect(prev).toBeNull()
+  })
+
+  it('Week 3 March 2027 → Week 2 March 2027 (same month)', () => {
+    const prev = getPreviousPeriod({
+      kind: 'week',
+      year: 2027,
+      month: 3,
+      weekIndex: 3,
+    } as ReportingPeriodSelection)
+    expect(prev).toEqual({ kind: 'week', year: 2027, month: 3, weekIndex: 2 })
+    const resolved = resolveSelection(prev!, prevLines)
+    expect(resolved!.startDate).toBe('2027-03-08')
+    expect(resolved!.endDate).toBe('2027-03-14')
+    expect(resolved!.label).toBe('Week 2 · Mar 2027')
+  })
+
+  it('Week 2 March 2027 → Week 1 March 2027 (same month)', () => {
+    const prev = getPreviousPeriod({
+      kind: 'week',
+      year: 2027,
+      month: 3,
+      weekIndex: 2,
+    } as ReportingPeriodSelection)
+    expect(prev).toEqual({ kind: 'week', year: 2027, month: 3, weekIndex: 1 })
+    const resolved = resolveSelection(prev!, prevLines)
+    expect(resolved!.startDate).toBe('2027-03-01')
+    expect(resolved!.endDate).toBe('2027-03-07')
+  })
+
+  it('Week 1 March 2027 → no previous week within the selected month', () => {
+    const prev = getPreviousPeriod({
+      kind: 'week',
+      year: 2027,
+      month: 3,
+      weekIndex: 1,
+    } as ReportingPeriodSelection)
+    expect(prev).toBeNull()
   })
 })
 

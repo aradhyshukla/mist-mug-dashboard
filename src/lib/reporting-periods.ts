@@ -308,26 +308,42 @@ function getAllTimeRange(lines: ProcessedLine[]): { start: string; end: string }
 // ---------------------------------------------------------------
 
 /**
- * Returns the comparable previous period for a given selection, or null when
- * no meaningful previous period exists (e.g. All Time).
+ * Returns the comparable previous period for a given selection, at the SAME
+ * hierarchy level, or null when no meaningful previous period exists.
+ *
+ * Rules:
+ *   - Year Y   → Year Y−1 (null if the preceding year has no sales data)
+ *   - Month M  → Month M−1 within the SAME year. January → null
+ *                ("No previous month within the selected year")
+ *   - Week N   → Week N−1 within the SAME month. Week 1 → null
+ *                ("No previous week within the selected month")
+ *   - All Time → null (lifetime metrics only, no previous period)
+ *
+ * The returned selection is a candidate: call resolveSelection to confirm it
+ * still has data in the current dataset (a stale selection resolves to null).
  */
 export function getPreviousPeriod(selection: ReportingPeriodSelection): ReportingPeriodSelection | null {
   switch (selection.kind) {
     case 'year':
       return { kind: 'year', year: selection.year - 1 }
     case 'month': {
+      // January has no previous month within the selected year.
       if (selection.month === 1) {
-        return { kind: 'month', year: selection.year - 1, month: 12 }
+        return null
       }
       return { kind: 'month', year: selection.year, month: selection.month - 1 }
     }
     case 'week': {
-      // Previous comparable calendar-week segment: same week index in the
-      // previous month (or December of the previous year for January).
-      if (selection.month === 1) {
-        return { kind: 'week', year: selection.year - 1, month: 12, weekIndex: selection.weekIndex }
+      // Week 1 has no previous week within the selected month.
+      if (selection.weekIndex === 1) {
+        return null
       }
-      return { kind: 'week', year: selection.year, month: selection.month - 1, weekIndex: selection.weekIndex }
+      return {
+        kind: 'week',
+        year: selection.year,
+        month: selection.month,
+        weekIndex: selection.weekIndex - 1,
+      }
     }
     case 'all-time':
       return null
@@ -335,7 +351,8 @@ export function getPreviousPeriod(selection: ReportingPeriodSelection): Reportin
 }
 
 /**
- * Human-readable label for a previous period.
+ * Human-readable label for a previous period. Returns null when there is no
+ * comparable previous period (e.g. January, Week 1, All Time).
  */
 export function previousPeriodLabel(selection: ReportingPeriodSelection): string | null {
   const prev = getPreviousPeriod(selection)
@@ -346,7 +363,6 @@ export function previousPeriodLabel(selection: ReportingPeriodSelection): string
     case 'month':
       return monthLabel(prev.year, prev.month)
     case 'week': {
-      // We can't know the exact dates without the line data; give a generic label.
       return `Week ${prev.weekIndex} · ${monthLabel(prev.year, prev.month)}`
     }
     case 'all-time':

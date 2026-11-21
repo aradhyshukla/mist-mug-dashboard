@@ -22,20 +22,24 @@ import { EmptyState } from '@/components/common/EmptyState'
 import { ReportingPeriodNavigator } from '@/components/common/ReportingPeriodNavigator'
 import {
   computeDashboardMetrics,
-  computeGrowthMetrics,
-  computeProductChanges,
-  computeCategoryChanges,
+  computeTopProducts,
+  computeCategoryPerformance,
   computeHistoricalGrowth,
 } from '@/lib/analytics'
 import { getAllImportLines } from '@/db'
-import { resolveSelection, getPreviousPeriod, previousPeriodLabel, type ResolvedPeriod } from '@/lib/reporting-periods'
+import {
+  resolveSelection,
+  getPreviousPeriod,
+  previousPeriodLabel,
+  type ResolvedPeriod,
+} from '@/lib/reporting-periods'
 import { useReportingPeriodState } from '@/lib/useReportingPeriodState'
 import { onDataChanged } from '@/lib/events'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Link } from 'react-router-dom'
 import { formatInr, cn } from '@/lib/utils'
-import type { ProcessedLine, ComparisonType } from '@/types'
+import type { ProcessedLine, ComparisonType, ProductPerformance } from '@/types'
 
 const PERFORMANCE_STORAGE_KEY = 'mistmug:performance:appliedPeriod'
 
@@ -47,6 +51,78 @@ function formatPct(value: number | null): string {
 function formatAbs(value: number | null): string {
   if (value === null) return 'N/A'
   return `${value >= 0 ? '+' : ''}₹${Math.abs(value)}`
+}
+
+/** Inclusive calendar-day count between two YYYY-MM-DD dates. */
+function daysInRange(start: string, end: string): number {
+  const [sy, sm, sd] = start.split('-').map(Number)
+  const [ey, em, ed] = end.split('-').map(Number)
+  const s = new Date(Date.UTC(sy, sm - 1, sd))
+  const e = new Date(Date.UTC(ey, em - 1, ed))
+  return Math.ceil((e.getTime() - s.getTime()) / 86400000) + 1
+}
+
+function buildProductChange(
+  current: ProductPerformance,
+  previous: ProductPerformance | null
+): Record<string, unknown> {
+  const prevRevenue = previous?.revenueInr ?? null
+  const prevQty = previous?.quantitySold ?? null
+  const prevOrders = previous?.orderCount ?? null
+
+  let revenueChange: number | null = null
+  let revenuePctChange: number | null = null
+  if (prevRevenue !== null && prevRevenue > 0) {
+    revenueChange = Math.round((current.revenueInr - prevRevenue) * 100) / 100
+    revenuePctChange = Math.round(((current.revenueInr - prevRevenue) / prevRevenue) * 100 * 10) / 10
+  }
+
+  let quantityChange: number | null = null
+  let quantityPctChange: number | null = null
+  if (prevQty !== null && prevQty > 0) {
+    quantityChange = current.quantitySold - prevQty
+    quantityPctChange = Math.round(((current.quantitySold - prevQty) / prevQty) * 100 * 10) / 10
+  }
+
+  return {
+    productName: current.productName,
+    category: current.category,
+    currentRevenue: current.revenueInr,
+    previousRevenue: prevRevenue,
+    currentQuantity: current.quantitySold,
+    previousQuantity: prevQty,
+    revenueChange,
+    revenuePercentChange: revenuePctChange,
+    quantityChange,
+    quantityPercentChange: quantityPctChange,
+    currentOrderCount: current.orderCount,
+    previousOrderCount: prevOrders,
+  }
+}
+
+function buildCategoryChange(
+  current: { category: string; revenueInr: number; quantitySold: number },
+  previous: { category: string; revenueInr: number; quantitySold: number } | null
+): Record<string, unknown> {
+  const prevRevenue = previous?.revenueInr ?? null
+  const prevQty = previous?.quantitySold ?? null
+
+  let revenueChange: number | null = null
+  let revenuePctChange: number | null = null
+  if (prevRevenue !== null && prevRevenue > 0) {
+    revenueChange = Math.round((current.revenueInr - prevRevenue) * 100) / 100
+    revenuePctChange = Math.round(((current.revenueInr - prevRevenue) / prevRevenue) * 100 * 10) / 10
+  }
+
+  return {
+    category: current.category,
+    currentRevenue: current.revenueInr,
+    previousRevenue: prevRevenue,
+    revenueChange,
+    revenuePercentChange: revenuePctChange,
+    currentQuantity: current.quantitySold,
+    previousQuantity: prevQty,
+  }
 }
 
 function selectionToComparisonType(
@@ -174,6 +250,7 @@ export function PerformanceTracker() {
     previousLabel: string | null
     isAllTime: boolean
   } | null>(null)
+  const [coverageWarning, setCoverageWarning] = React.useState<string | null>(null)
   const [productChanges, setProductChanges] = React.useState<Array<any>>([])
   const [categoryChanges, setCategoryChanges] = React.useState<Array<any>>([])
   const [historicalGrowth, setHistoricalGrowth] = React.useState<Array<any>>([])
@@ -229,28 +306,58 @@ export function PerformanceTracker() {
   async function loadPerformance() {
     setLoading(true)
     setError(null)
+    setCoverageWarning(null)
     try {
       if (!range) return
 
       const { startDate: currentStart, endDate: currentEnd } = range
-      const comparisonType = applied ? selectionToComparisonType(applied.kind) : null
       const isAllTime = applied?.kind === 'all-time'
 
-      const previous = applied ? getPreviousPeriod(applied) : null
-      const previousResolved = previous ? resolveSelection(previous, lines) : null
+      // Previous period at the SAME hierarchy level (Year→Year−1, Month→Month−1
+      // same year, Week→Week−1 same month; January/Week 1/All Time → null).
+      const previousSelection = applied ? getPreviousPeriod(applied) : null
+      const previousResolved = previousSelection ? resolveSelection(previousSelection, lines) : null
+
+      // Determine whether the previous period actually contains imported records.
+      let previousMetrics: {
+        revenueInr: number
+        orderCount: number
+        itemsSold: number
+        averageOrderValue: number
+      } | null = null
+      if (previousResolved) {
+        previousMetrics = await computeDashboardMetrics(
+          previousResolved.startDate,
+          previousResolved.endDate
+        )
+      }
+      const hasPreviousData = previousMetrics?.orderCount ?? 0 > 0
 
       setPeriodInfo({
         currentStart,
         currentEnd,
-        previousStart: previousResolved?.startDate ?? null,
-        previousEnd: previousResolved?.endDate ?? null,
-        previousLabel: previous ? previousPeriodLabel(previous) : null,
+        previousStart: hasPreviousData ? previousResolved!.startDate : null,
+        previousEnd: hasPreviousData ? previousResolved!.endDate : null,
+        previousLabel: hasPreviousData && previousSelection ? previousPeriodLabel(previousSelection) : null,
         isAllTime,
       })
 
-      if (!comparisonType || isAllTime) {
+      // Coverage warning: partial calendar weeks compared against a different-length week.
+      if (applied?.kind === 'week' && previousResolved) {
+        const currentDays = daysInRange(currentStart, currentEnd)
+        const previousDays = daysInRange(previousResolved.startDate, previousResolved.endDate)
+        if (currentDays !== previousDays) {
+          setCoverageWarning(
+            'Comparison periods have different calendar-day lengths. Percentage changes are unadjusted totals.'
+          )
+        }
+      }
+
+      const current = await computeDashboardMetrics(currentStart, currentEnd)
+      const previousForMetrics = hasPreviousData ? previousMetrics : null
+
+      if (isAllTime) {
         // All Time: lifetime metrics only, no previous period.
-        const current = await computeDashboardMetrics(currentStart, currentEnd)
         setGrowthMetrics([
           buildMetric('Revenue', current.revenueInr, null),
           buildMetric('Orders', current.orderCount, null),
@@ -260,28 +367,41 @@ export function PerformanceTracker() {
         setProductChanges([])
         setCategoryChanges([])
       } else {
-        const metrics = await computeGrowthMetrics(
-          comparisonType,
-          currentStart,
-          currentEnd
-        )
-        setGrowthMetrics(metrics)
+        setGrowthMetrics([
+          buildMetric('Revenue', current.revenueInr, previousForMetrics?.revenueInr ?? null),
+          buildMetric('Orders', current.orderCount, previousForMetrics?.orderCount ?? null),
+          buildMetric('Units Sold', current.itemsSold, previousForMetrics?.itemsSold ?? null),
+          buildMetric(
+            'Avg Order Value',
+            current.averageOrderValue,
+            previousForMetrics?.averageOrderValue ?? null
+          ),
+        ])
 
-        const products = await computeProductChanges(
-          comparisonType,
-          currentStart,
-          currentEnd
+        // Product-level changes: current vs same-hierarchy previous, matched by product identity.
+        const currentProducts = await computeTopProducts(currentStart, currentEnd, 100)
+        const previousProducts = previousForMetrics
+          ? await computeTopProducts(previousResolved!.startDate, previousResolved!.endDate, 100)
+          : []
+        const previousProductMap = new Map(
+          previousProducts.map((p) => [`${p.productName}|${p.category}`, p])
         )
-        setProductChanges(products)
+        setProductChanges(
+          currentProducts.map((p) => buildProductChange(p, previousProductMap.get(`${p.productName}|${p.category}`) ?? null))
+        )
 
-        const categories = await computeCategoryChanges(
-          comparisonType,
-          currentStart,
-          currentEnd
+        // Category-level changes: current vs same-hierarchy previous.
+        const currentCats = await computeCategoryPerformance(currentStart, currentEnd)
+        const previousCats = previousForMetrics
+          ? await computeCategoryPerformance(previousResolved!.startDate, previousResolved!.endDate)
+          : []
+        const previousCatMap = new Map(previousCats.map((c) => [c.category, c]))
+        setCategoryChanges(
+          currentCats.map((c) => buildCategoryChange(c, previousCatMap.get(c.category) ?? null))
         )
-        setCategoryChanges(categories)
       }
 
+      const comparisonType = applied ? selectionToComparisonType(applied.kind) : null
       const history = await computeHistoricalGrowth(comparisonType ?? 'year-over-year')
       setHistoricalGrowth(history)
     } catch (err) {
@@ -412,9 +532,15 @@ export function PerformanceTracker() {
                   Previous ({periodInfo.previousLabel}): {periodInfo.previousStart} → {periodInfo.previousEnd}
                 </span>
               )}
+              {!periodInfo.isAllTime && !periodInfo.previousStart && (
+                <span>No previous period data</span>
+              )}
               {periodInfo.isAllTime && <span>Lifetime — no previous period</span>}
             </div>
           </div>
+          {coverageWarning && (
+            <p className="mt-2 text-xs text-[#8a2f1d]">⚠ {coverageWarning}</p>
+          )}
         </div>
       )}
 
