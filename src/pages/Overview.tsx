@@ -9,6 +9,7 @@ import { Select } from '@/components/ui/select'
 import { Plus } from 'lucide-react'
 import { type Product } from '@/types'
 import { getAllProducts, createProduct, updateProduct, deactivateProduct, activateProduct, seedStarterCatalog } from '@/db'
+import { onDataChanged } from '@/lib/events'
 
 export const CATEGORIES = ['All', 'Coffee', 'Tea', 'Bakery', 'Cold Beverage', 'Signature', 'Merchandise'] as const
 
@@ -31,6 +32,14 @@ export function Overview() {
 
   React.useEffect(() => {
     loadProducts()
+  }, [])
+
+  // Refresh products when data changes (e.g., after upload deletion)
+  React.useEffect(() => {
+    const unsubscribe = onDataChanged(() => {
+      loadProducts()
+    })
+    return unsubscribe
   }, [])
 
   async function loadProducts() {

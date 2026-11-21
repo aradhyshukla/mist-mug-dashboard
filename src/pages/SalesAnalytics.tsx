@@ -17,6 +17,7 @@ import {
   computeDailyTrend,
   computeCategoryPerformance,
 } from '@/lib/analytics'
+import { onDataChanged } from '@/lib/events'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 
@@ -48,6 +49,14 @@ export function SalesAnalytics() {
   React.useEffect(() => {
     loadAnalytics()
   }, [period])
+
+  // Recompute analytics when data changes (e.g., after upload deletion)
+  React.useEffect(() => {
+    const unsubscribe = onDataChanged(() => {
+      loadAnalytics()
+    })
+    return unsubscribe
+  }, [])
 
   async function loadAnalytics() {
     setLoading(true)

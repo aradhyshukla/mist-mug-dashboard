@@ -19,6 +19,7 @@ import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { type ComparisonType } from '@/types'
 import { formatInr, cn } from '@/lib/utils'
+import { onDataChanged } from '@/lib/events'
 
 type ViewMode = 'overview' | 'products' | 'categories' | 'history'
 
@@ -139,6 +140,14 @@ export function PerformanceTracker() {
   React.useEffect(() => {
     loadPerformance()
   }, [comparisonType, viewMode])
+
+  // Recompute performance when data changes (e.g., after upload deletion)
+  React.useEffect(() => {
+    const unsubscribe = onDataChanged(() => {
+      loadPerformance()
+    })
+    return unsubscribe
+  }, [])
 
   async function loadPerformance() {
     setLoading(true)

@@ -17,6 +17,8 @@ export type ProductCategory =
   | 'Signature'
   | 'Merchandise'
 
+export type ProductSource = 'website' | 'user' | 'legacy' | 'starter'
+
 export interface Product {
   id: ProductId
   name: string
@@ -25,6 +27,7 @@ export interface Product {
   currentPriceInr: number // current catalog selling price (INR)
   imageUrl?: string
   isActive: boolean
+  source: ProductSource // provenance: website (synced from mist-and-mug.onrender.com), user (manually added), legacy (pre-existing), starter (old fictional seed)
   createdAt: string // ISO timestamp
   updatedAt: string // ISO timestamp
 }
@@ -36,6 +39,7 @@ export interface ProductInput {
   currentPriceInr: number
   imageUrl?: string
   isActive?: boolean
+  source?: ProductSource
 }
 
 export interface TransactionLine {
@@ -114,8 +118,94 @@ export interface StarterProduct {
 }
 
 // ============================================================================
-// Phase 2: Sales Import & Analytics Types
+// Issue 1: Verified website catalogue (source: https://mist-and-mug.onrender.com)
+// Website menu data extracted from the site's embedded MENU array (IDs m01-m30).
+// Website categories map to dashboard categories as follows:
+//   COFFEE → Coffee (hot) / Cold Beverage (cold items: Cold Brew, Orange Espresso Tonic)
+//   MOUNTAIN WARMERS → Tea
+//   BREAKFAST → Bakery
+//   SMALL PLATES → Signature
+//   SWEET → Signature
 // ============================================================================
+
+export type WebsiteCategory = 'COFFEE' | 'MOUNTAIN WARMERS' | 'BREAKFAST' | 'SMALL PLATES' | 'SWEET'
+
+export interface WebsiteProduct {
+  id: string // website m01-m30
+  name: string
+  category: WebsiteCategory
+  description: string
+  price: number
+  vegetarian: boolean
+  vegan: boolean
+  allergens: string[]
+  caffeine: string
+  temp: 'hot' | 'cold' | 'room'
+  taste: string[]
+  mood: string[]
+  featured: boolean
+  housePick: boolean
+}
+
+export const WEBSITE_CATEGORY_MAP: Record<WebsiteCategory, ProductCategory> = {
+  'COFFEE': 'Coffee',
+  'MOUNTAIN WARMERS': 'Tea',
+  'BREAKFAST': 'Bakery',
+  'SMALL PLATES': 'Signature',
+  'SWEET': 'Signature',
+}
+
+// Cold items from the COFFEE website category map to Cold Beverage instead of Coffee
+export const COFFEE_COLD_ITEMS = new Set(['m06', 'm07']) // Cold Brew, Orange Espresso Tonic
+
+export const VERIFIED_PRODUCTS: Array<Omit<WebsiteProduct, 'vegetarian' | 'vegan' | 'allergens' | 'caffeine' | 'temp' | 'taste' | 'mood' | 'featured' | 'housePick'>> = [
+  { id: 'm01', name: 'Landour Latte', category: 'COFFEE', description: 'Espresso, steamed milk, a whisper of cardamom.', price: 220 },
+  { id: 'm02', name: 'Classic Cappuccino', category: 'COFFEE', description: 'Equal parts espresso, milk, and foam.', price: 190 },
+  { id: 'm03', name: 'Flat White', category: 'COFFEE', description: 'Ristretto shots under a thin layer of micro-foam.', price: 210 },
+  { id: 'm04', name: 'Espresso', category: 'COFFEE', description: 'A double shot, nothing standing in its way.', price: 140 },
+  { id: 'm05', name: 'Hazelnut Cortado', category: 'COFFEE', description: 'Espresso cut with warm milk, a note of roasted hazelnut.', price: 230 },
+  { id: 'm06', name: 'Cold Brew', category: 'COFFEE', description: 'Steeped 18 hours, served over ice, no dilution.', price: 210 },
+  { id: 'm07', name: 'Orange Espresso Tonic', category: 'COFFEE', description: 'Espresso over tonic water, a wide slice of orange.', price: 260 },
+  { id: 'm08', name: 'Americano', category: 'COFFEE', description: 'Espresso, opened up with hot water.', price: 160 },
+  { id: 'm09', name: 'Pahadi Masala Chai', category: 'MOUNTAIN WARMERS', description: 'Black tea, whole spices, simmered with milk the hill way.', price: 130 },
+  { id: 'm10', name: 'Kashmiri Kahwa', category: 'MOUNTAIN WARMERS', description: 'Green tea, saffron, almond slivers, a little cinnamon.', price: 150 },
+  { id: 'm11', name: 'Himalayan Hot Chocolate', category: 'MOUNTAIN WARMERS', description: 'Dark chocolate melted slowly into whole milk.', price: 240 },
+  { id: 'm12', name: 'Ginger Lemon Honey', category: 'MOUNTAIN WARMERS', description: 'Fresh ginger, lemon, and honey in hot water.', price: 170 },
+  { id: 'm13', name: 'Turmeric Milk', category: 'MOUNTAIN WARMERS', description: 'Warm milk, turmeric, a little black pepper.', price: 180 },
+  { id: 'm14', name: 'French Butter Croissant', category: 'BREAKFAST', description: 'Laminated, baked each morning, nothing added.', price: 160 },
+  { id: 'm15', name: 'Mountain Breakfast Plate', category: 'BREAKFAST', description: 'Eggs, sautéed greens, roasted potatoes, toast.', price: 480 },
+  { id: 'm16', name: 'Avocado Sourdough', category: 'BREAKFAST', description: 'Smashed avocado, chili flake, lemon, on sourdough.', price: 320 },
+  { id: 'm17', name: 'Wild Mushroom Toast', category: 'BREAKFAST', description: 'Sautéed local mushrooms, thyme, brown butter.', price: 340 },
+  { id: 'm18', name: 'Cinnamon French Toast', category: 'BREAKFAST', description: 'Brioche, cinnamon custard, maple.', price: 300 },
+  { id: 'm19', name: 'Bun Maska', category: 'BREAKFAST', description: 'Soft bun, cold butter, a little sugar on the side.', price: 150 },
+  { id: 'm20', name: 'Cheese Chilli Toast', category: 'SMALL PLATES', description: 'Melted cheese, green chili, grilled bread.', price: 260 },
+  { id: 'm21', name: 'Himalayan Herb Fries', category: 'SMALL PLATES', description: 'Hand-cut fries, mountain herbs, sea salt.', price: 220 },
+  { id: 'm22', name: 'Roasted Vegetable Sandwich', category: 'SMALL PLATES', description: 'Seasonal vegetables, herb oil, grilled sourdough.', price: 280 },
+  { id: 'm23', name: 'Paneer Tikka Toastie', category: 'SMALL PLATES', description: 'Tandoor-spiced paneer, mint chutney, toasted bread.', price: 300 },
+  { id: 'm24', name: 'Soup of the Fog', category: 'SMALL PLATES', description: 'A rotating wild mushroom soup, cream, thyme oil.', price: 240 },
+  { id: 'm25', name: 'Burnt Basque Cheesecake', category: 'SWEET', description: 'Deliberately scorched top, molten center.', price: 260 },
+  { id: 'm26', name: 'Apple Cinnamon Tart', category: 'SWEET', description: 'Thin apple slices, cinnamon, a shortcrust base.', price: 210 },
+  { id: 'm27', name: 'Dark Chocolate Eclair', category: 'SWEET', description: 'Choux pastry, vanilla cream, dark chocolate glaze.', price: 230 },
+  { id: 'm28', name: 'Cloud Tiramisu', category: 'SWEET', description: 'Espresso-soaked layers, mascarpone, cocoa dust.', price: 280 },
+  { id: 'm29', name: 'Classic Madeleines', category: 'SWEET', description: 'Shell-shaped, buttery, a little citrus zest.', price: 170 },
+  { id: 'm30', name: 'Walnut Banana Loaf', category: 'SWEET', description: 'Dense banana loaf, toasted walnut, a little brown sugar.', price: 190 },
+]
+
+// Converts a WebsiteProduct to a ProductInput with dashboard category mapping
+export function websiteProductToInput(wp: Omit<WebsiteProduct, 'vegetarian' | 'vegan' | 'allergens' | 'caffeine' | 'temp' | 'taste' | 'mood' | 'featured' | 'housePick'>): ProductInput {
+  let category = WEBSITE_CATEGORY_MAP[wp.category]
+  // Cold coffee items map to Cold Beverage instead of Coffee
+  if (wp.category === 'COFFEE' && COFFEE_COLD_ITEMS.has(wp.id)) {
+    category = 'Cold Beverage'
+  }
+  return {
+    name: wp.name,
+    category,
+    currentPriceInr: wp.price,
+    description: wp.description,
+    source: 'website',
+  }
+}
 
 export type TimeFilter = 'week' | 'month' | 'year' | 'all-time'
 
