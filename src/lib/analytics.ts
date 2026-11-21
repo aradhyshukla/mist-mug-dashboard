@@ -79,6 +79,24 @@ export async function fetchValidLines(): Promise<ProcessedLine[]> {
 }
 
 // ---------------------------------------------------------------
+// Date range helpers
+// ---------------------------------------------------------------
+
+export async function getLatestTransactionDate(): Promise<string | null> {
+  const all = await getAllImportLines()
+  const valid = all.filter(isValidLine)
+  if (valid.length === 0) return null
+  return valid.reduce((max, line) => (line.date > max ? line.date : max), valid[0].date)
+}
+
+export async function getEarliestTransactionDate(): Promise<string | null> {
+  const all = await getAllImportLines()
+  const valid = all.filter(isValidLine)
+  if (valid.length === 0) return null
+  return valid.reduce((min, line) => (line.date < min ? line.date : min), valid[0].date)
+}
+
+// ---------------------------------------------------------------
 // Dashboard Metrics (KPI Cards)
 // ---------------------------------------------------------------
 

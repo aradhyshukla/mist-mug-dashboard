@@ -14,6 +14,7 @@ import {
 import { db, saveImportResult, removeImportBatch, seedStarterCatalog, getImportLinesByBatch } from '@/db'
 import type { ImportResult, ProcessedLine, Product, ProductId, UploadBatchId } from '@/types'
 import { emitDataChanged, onDataChanged } from '@/lib/events'
+import { getLatestTransactionDate } from '@/lib/analytics'
 
 describe('normalizeHeader', () => {
   it('normalizes headers to lowercase with single spaces', () => {
@@ -909,4 +910,98 @@ describe('Issue 2: Upload deletion and analytics refresh', () => {
     })
   })
 })
+
+// ============================================================================
+// Regression: Import → Delete → Reimport date range cycle
+// ============================================================================
+
+describe('Issue: Performance Tracker date range after import/delete', () => {
+  function makeLine(
+    compositeKey: string,
+    transactionId: string,
+    date: string,
+    isValid = true,
+    isDuplicate = false,
+  ): ProcessedLine {
+    return {
+      compositeKey,
+      transactionId,
+      lineId: undefined,
+      date,
+      time: undefined,
+      itemName: 'Coffee',
+      categoryResolved: 'Coffee',
+      quantity: 2,
+      unitPriceInr: 180,
+      lineTotalInr: 360,
+      productId: undefined,
+      productName: 'Coffee',
+      validationIssues: [],
+      isValid,
+      isDuplicate,
+    }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('getLatestTransactionDate returns latest valid line date', async () => {
+    vi.spyOn(db.importLines, 'toArray').mockResolvedValue([
+      makeLine('txn1|Coffee|2024-11-01', 'txn1', '2024-11-01', true, false),
+      makeLine('txn2|Tea|2024-11-15', 'txn2', '2024-11-15', true, false),
+      makeLine('txn3|Tea|2024-11-10', 'txn3', '2024-11-10', true, false),
+      makeLine('txn4|Invalid|2024-12-01', 'txn4', '2024-12-01', false, false), // invalid, should be ignored
+    ])
+
+    const latest = await getLatestTransactionDate()
+    expect(latest).toBe('2024-11-15')
+  })
+
+  it('getLatestTransactionDate returns null when no valid lines', async () => {
+    vi.spyOn(db.importLines, 'toArray').mockResolvedValue([])
+    const latest = await getLatestTransactionDate()
+    expect(latest).toBeNull()
+  })
+
+  it('default dates use transaction dates, not system clock', async () => {
+    // Fix system clock to a far-future date to prove we use transaction dates
+    vi.spyOn(global.Date, 'now').mockImplementation(() => new Date('2026-11-22T00:00:00Z').getTime())
+
+    vi.spyOn(db.importLines, 'toArray').mockResolvedValue([
+      makeLine('txn1|Coffee|2024-11-04', 'txn1', '2024-11-04', true, false),
+      makeLine('txn2|Tea|2024-11-04', 'txn2', '2024-11-04', true, false),
+    ])
+
+    const latest = await getLatestTransactionDate()
+    expect(latest).toBe('2024-11-04') // from data, NOT 2026-11-22
+
+    vi.spyOn(global.Date, 'now').mockRestore()
+  })
+
+  it('import → delete → reimport cycle updates dates correctly', async () => {
+    // Phase 1: Import Batch A with dates in Nov 2024
+    const batchALines = [
+      makeLine('txn-A-1|Coffee|2024-11-01', 'txn-A-1', '2024-11-01', true, false),
+      makeLine('txn-A-2|Tea|2024-11-02', 'txn-A-2', '2024-11-02', true, false),
+    ]
+    vi.spyOn(db.importLines, 'toArray').mockResolvedValue(batchALines)
+
+    let latest = await getLatestTransactionDate()
+    expect(latest).toBe('2024-11-02')
+
+    // Phase 2: Delete Batch A
+    vi.spyOn(db.importLines, 'toArray').mockResolvedValue([])
+    latest = await getLatestTransactionDate()
+    expect(latest).toBeNull()
+
+    // Phase 3: Reimport Batch A with same dates
+    vi.spyOn(db.importLines, 'toArray').mockResolvedValue(batchALines)
+    latest = await getLatestTransactionDate()
+    expect(latest).toBe('2024-11-02')
+
+    vi.restoreAllMocks()
+  })
+})
+
 

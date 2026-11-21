@@ -14,14 +14,13 @@ import {
   computeCategoryChanges,
   computeHistoricalGrowth,
   getComparisonPeriods,
+  getLatestTransactionDate,
 } from '@/lib/analytics'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { type ComparisonType } from '@/types'
 import { formatInr, cn } from '@/lib/utils'
 import { onDataChanged } from '@/lib/events'
-
-type ViewMode = 'overview' | 'products' | 'categories' | 'history'
 
 const COMPARISONS: Array<{ value: ComparisonType; label: string }> = [
   { value: 'week-over-week', label: 'Week-over-Week' },
@@ -106,7 +105,6 @@ export function PerformanceTracker() {
   )
   const [loading, setLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
-  const [viewMode] = React.useState<ViewMode>('overview')
 
   const [growthMetrics, setGrowthMetrics] = React.useState<
     Array<{
@@ -139,7 +137,7 @@ export function PerformanceTracker() {
 
   React.useEffect(() => {
     loadPerformance()
-  }, [comparisonType, viewMode])
+  }, [comparisonType])
 
   // Recompute performance when data changes (e.g., after upload deletion)
   React.useEffect(() => {
@@ -149,11 +147,60 @@ export function PerformanceTracker() {
     return unsubscribe
   }, [])
 
+  // Compute default reporting period from actual transaction data,
+  // not the system clock. Falls back gracefully when no data exists.
+  async function getDefaultDates(type: ComparisonType): Promise<{ start: string; end: string }> {
+    const latest = await getLatestTransactionDate()
+    if (!latest) {
+      // No transactions: return an empty range so the UI shows no-data states
+      return { start: '', end: '' }
+    }
+
+    const latestDate = new Date(Date.UTC(
+      parseInt(latest.slice(0, 4), 10),
+      parseInt(latest.slice(5, 7), 10) - 1,
+      parseInt(latest.slice(8, 10), 10)
+    ))
+
+    let start: Date
+    let end: Date = new Date(Date.UTC(
+      latestDate.getUTCFullYear(),
+      latestDate.getUTCMonth(),
+      latestDate.getUTCDate()
+    ))
+
+    if (type === 'year-over-year') {
+      start = new Date(Date.UTC(end.getUTCFullYear() - 1, end.getUTCMonth(), end.getUTCDate()))
+      end = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate()))
+    } else if (type === 'month-over-month') {
+      start = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() - 1, end.getUTCDate()))
+    } else {
+      // week-over-week: 14 days back
+      start = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate() - 13))
+    }
+
+    return {
+      start: start.toISOString().split('T')[0],
+      end: end.toISOString().split('T')[0],
+    }
+  }
+
   async function loadPerformance() {
     setLoading(true)
     setError(null)
     try {
-      const periods = getComparisonPeriods(comparisonType, getDefaultStart(comparisonType), getDefaultEnd(comparisonType))
+      const dates = await getDefaultDates(comparisonType)
+      // If there is no transaction data at all, show empty state
+      if (!dates.start || !dates.end) {
+        setPeriodInfo(null)
+        setGrowthMetrics([])
+        setProductChanges([])
+        setCategoryChanges([])
+        setHistoricalGrowth([])
+        return
+      }
+
+      const periods = getComparisonPeriods(comparisonType, dates.start, dates.end)
       setPeriodInfo(periods)
 
       const metrics = await computeGrowthMetrics(
@@ -186,35 +233,6 @@ export function PerformanceTracker() {
     }
   }
 
-  function getDefaultStart(type: ComparisonType): string {
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    if (type === 'year-over-year') {
-      today.setFullYear(today.getFullYear() - 1)
-    } else if (type === 'month-over-month') {
-      today.setMonth(today.getMonth() - 1)
-    } else {
-      today.setDate(today.getDate() - 14)
-    }
-    return today.toISOString().split('T')[0]
-  }
-
-  function getDefaultEnd(type: ComparisonType): string {
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    if (type === 'year-over-year') {
-      today.setFullYear(today.getFullYear() - 1)
-      today.setMonth(11)
-      today.setDate(31)
-    } else if (type === 'month-over-month') {
-      today.setMonth(today.getMonth(), 0)
-      today.setDate(0)
-    } else {
-      today.setDate(today.getDate() - 1)
-    }
-    return today.toISOString().split('T')[0]
-  }
-
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center h-full">
@@ -230,6 +248,19 @@ export function PerformanceTracker() {
         <Button variant="brand" onClick={loadPerformance}>
           Retry
         </Button>
+      </div>
+    )
+  }
+
+  // No transaction data: show empty state
+  if (!periodInfo) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-center">
+        <EmptyState
+          title="No sales data"
+          description="Import sales data via Upload Data to view performance comparisons. Week, Month, Year and All Time filters will become available once data exists."
+          icon={<Table className="w-10 h-10 text-rain/30 mx-auto mb-3" />}
+        />
       </div>
     )
   }
