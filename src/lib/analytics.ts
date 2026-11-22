@@ -12,6 +12,9 @@ import type {
   MonthlyData,
   YearlyData,
   ProductPerformance,
+  ProductCategory,
+  ProductId,
+  Product,
   CategoryPerformance,
   HourlyData,
   DailyData,
@@ -24,7 +27,7 @@ import type {
   PeriodComparison,
 } from '@/types'
 
-import { getAllImportLines } from '@/db'
+import { getAllImportLines, getAllProducts } from '@/db'
 
 // ---------------------------------------------------------------
 // Helpers
@@ -136,6 +139,7 @@ export async function computeTopProducts(
 ): Promise<ProductPerformance[]> {
   const all = await fetchValidLines()
   const filtered = filterByDateRange(all, startDate, endDate)
+  const lookup = await buildProductLookup()
 
   const productMap = new Map<string, ProductPerformance>()
 
@@ -150,7 +154,7 @@ export async function computeTopProducts(
       productMap.set(key, {
         productId: line.productId,
         productName: line.productName,
-        category: line.categoryResolved,
+        category: resolveLineCategory(line, lookup),
         quantitySold: line.quantity,
         revenueInr: line.lineTotalInr,
         averageSellingPrice: line.quantity > 0 ? line.lineTotalInr / line.quantity : 0,
@@ -166,7 +170,7 @@ export async function computeTopProducts(
   }))
 
   return result
-    .sort((a, b) => b.revenueInr - a.revenueInr)
+    .sort((a, b) => b.revenueInr - a.revenueInr || a.productName.localeCompare(b.productName))
     .slice(0, limit)
 }
 
@@ -177,6 +181,7 @@ export async function computeTopProductsByQuantity(
 ): Promise<ProductPerformance[]> {
   const all = await fetchValidLines()
   const filtered = filterByDateRange(all, startDate, endDate)
+  const lookup = await buildProductLookup()
 
   const productMap = new Map<string, ProductPerformance>()
 
@@ -190,7 +195,7 @@ export async function computeTopProductsByQuantity(
       productMap.set(key, {
         productId: line.productId,
         productName: line.productName,
-        category: line.categoryResolved,
+        category: resolveLineCategory(line, lookup),
         quantitySold: line.quantity,
         revenueInr: line.lineTotalInr,
         averageSellingPrice: line.quantity > 0 ? line.lineTotalInr / line.quantity : 0,
@@ -363,6 +368,80 @@ export async function computeDailyTrend(
     .sort((a, b) => a.date.localeCompare(b.date))
 }
 
+// ---------------------------------------------------------------
+// Monthly & Yearly trend buckets (for Revenue Trends grouping)
+//
+// Calendar month → daily; calendar year → monthly; All Time → yearly.
+// Each bucket reconciles: sum of bucket revenue = total revenue; sum of
+// bucket items = total items; orders count distinct transaction IDs.
+// ---------------------------------------------------------------
+
+export interface TrendBucket {
+  period: string // human-readable label
+  periodKey: string // sortable grouping key (YYYY-MM or YYYY)
+  revenueInr: number
+  orderCount: number
+  itemsSold: number
+}
+
+export async function computeMonthlyTrend(
+  startDate?: string,
+  endDate?: string
+): Promise<TrendBucket[]> {
+  const all = await fetchValidLines()
+  const filtered = filterByDateRange(all, startDate, endDate)
+
+  const monthMap = new Map<string, { revenue: number; items: number; orderIds: Set<string> }>()
+
+  for (const line of filtered) {
+    const key = getMonthKey(line.date)
+    const existing = monthMap.get(key) || { revenue: 0, items: 0, orderIds: new Set() }
+    existing.revenue += line.lineTotalInr
+    existing.items += line.quantity
+    existing.orderIds.add(line.transactionId)
+    monthMap.set(key, existing)
+  }
+
+  return Array.from(monthMap.entries())
+    .map(([key, data]) => ({
+      period: formatMonthLabel(key),
+      periodKey: key,
+      revenueInr: Math.round(data.revenue * 100) / 100,
+      orderCount: data.orderIds.size,
+      itemsSold: data.items,
+    }))
+    .sort((a, b) => a.periodKey.localeCompare(b.periodKey))
+}
+
+export async function computeYearlyTrend(
+  startDate?: string,
+  endDate?: string
+): Promise<TrendBucket[]> {
+  const all = await fetchValidLines()
+  const filtered = filterByDateRange(all, startDate, endDate)
+
+  const yearMap = new Map<number, { revenue: number; items: number; orderIds: Set<string> }>()
+
+  for (const line of filtered) {
+    const year = getYear(line.date)
+    const existing = yearMap.get(year) || { revenue: 0, items: 0, orderIds: new Set() }
+    existing.revenue += line.lineTotalInr
+    existing.items += line.quantity
+    existing.orderIds.add(line.transactionId)
+    yearMap.set(year, existing)
+  }
+
+  return Array.from(yearMap.entries())
+    .map(([year, data]) => ({
+      period: String(year),
+      periodKey: String(year),
+      revenueInr: Math.round(data.revenue * 100) / 100,
+      orderCount: data.orderIds.size,
+      itemsSold: data.items,
+    }))
+    .sort((a, b) => Number(a.periodKey) - Number(b.periodKey))
+}
+
 export async function computeWeeklyBreakdown(
   startDate?: string,
   endDate?: string
@@ -488,31 +567,143 @@ export async function computeCategoryPerformance(
   startDate?: string,
   endDate?: string
 ): Promise<CategoryPerformance[]> {
-  const all = await fetchValidLines()
-  const filtered = filterByDateRange(all, startDate, endDate)
+  const revenue = await computeCategoryRevenue(startDate, endDate)
+  return revenue.map((c) => ({
+    category: c.category as ProductCategory,
+    quantitySold: c.quantitySold,
+    revenueInr: c.revenueInr,
+    productCount: c.productCount,
+  }))
+}
 
-  const catMap = new Map<string, { revenue: number; quantity: number; products: Set<string> }>()
+// ---------------------------------------------------------------
+// Shared Category Revenue Aggregation (Preferences 2 & 4)
+//
+// Single source of truth for category-wise revenue distribution used by
+// both the Top-Selling Products donut view and the Category Performance
+// donut chart. Categories not in the verified set are reported as
+// "Unclassified" rather than being incorrectly lumped into Coffee.
+// Historical records are never modified.
+// ---------------------------------------------------------------
+
+export const VERIFIED_CATEGORIES: ReadonlySet<string> = new Set([
+  'Coffee',
+  'Tea',
+  'Bakery',
+  'Cold Beverage',
+  'Signature',
+  'Merchandise',
+]);
+
+// Shared category color map used by both category donut charts (Preferences 2 & 4).
+// Matches the Mist & Mug light café palette. Unknown/unresolved categories fall
+// back to the Unclassified swatch rather than being misassigned to Coffee.
+export const CATEGORY_COLORS: Record<string, string> = {
+  Coffee: '#142E25',        // deep forest green
+  Tea: '#6E422B',           // wood
+  Bakery: '#A6533F',        // muted terracotta / brick
+  'Cold Beverage': '#2a4a3c', // softer forest
+  Signature: '#8a2f1d',     // deep earth
+  Merchandise: '#a28b5a',   // muted gold
+  Unclassified: '#9aa7a1',  // muted rain
+};
+
+export interface CategoryRevenue {
+  category: string;
+  revenueInr: number;
+  quantitySold: number;
+  productCount: number;
+}
+
+// ---------------------------------------------------------------
+// Centralized category resolution
+//
+// Single source of truth for attributing a transaction line to a category.
+// Precedence:
+//   1. Verified product ID → catalogue category
+//   2. Verified normalized exact product-name match
+//   3. Reliable source transaction category (must be a verified category)
+//   4. 'Unclassified' (never defaults to Coffee)
+//
+// Historical records are never modified; attribution is corrected in the
+// analytics projection only.
+// ---------------------------------------------------------------
+
+function normalizeCategoryName(name: string): string {
+  return name
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/[_\s]+/g, ' ')
+    .replace(/[^\w\s]/g, '')
+    .trim()
+}
+
+interface ProductLookup {
+  byId: Map<ProductId, Product>
+  byName: Map<string, ProductCategory>
+}
+
+async function buildProductLookup(): Promise<ProductLookup> {
+  const products = await getAllProducts()
+  const byId = new Map<ProductId, Product>()
+  const byName = new Map<string, ProductCategory>()
+  for (const product of products) {
+    byId.set(product.id, product)
+    byName.set(normalizeCategoryName(product.name), product.category)
+  }
+  return { byId, byName }
+}
+
+export function resolveLineCategory(
+  line: ProcessedLine,
+  lookup: ProductLookup
+): ProductCategory {
+  // 1. Verified product ID → catalogue category.
+  if (line.productId && lookup.byId.has(line.productId)) {
+    return lookup.byId.get(line.productId)!.category
+  }
+  // 2. Verified normalized exact product-name match.
+  const normalized = normalizeCategoryName(line.productName)
+  if (lookup.byName.has(normalized)) {
+    return lookup.byName.get(normalized)!
+  }
+  // 3. Reliable source transaction category (only if verified).
+  if (VERIFIED_CATEGORIES.has(line.categoryResolved)) {
+    return line.categoryResolved
+  }
+  // 4. Unclassified — never fall back to Coffee.
+  return 'Unclassified'
+}
+
+export async function computeCategoryRevenue(
+  startDate?: string,
+  endDate?: string
+): Promise<CategoryRevenue[]> {
+  const all = await fetchValidLines();
+  const filtered = filterByDateRange(all, startDate, endDate);
+
+  const lookup = await buildProductLookup();
+
+  const catMap = new Map<string, { revenue: number; quantity: number; products: Set<string> }>();
 
   for (const line of filtered) {
-    const existing = catMap.get(line.categoryResolved) || {
-      revenue: 0,
-      quantity: 0,
-      products: new Set(),
-    }
-    existing.revenue += line.lineTotalInr
-    existing.quantity += line.quantity
-    existing.products.add(line.productName)
-    catMap.set(line.categoryResolved, existing)
+    const category = resolveLineCategory(line, lookup);
+    const existing = catMap.get(category) || { revenue: 0, quantity: 0, products: new Set() };
+    existing.revenue += line.lineTotalInr;
+    existing.quantity += line.quantity;
+    existing.products.add(line.productName);
+    catMap.set(category, existing);
   }
 
   return Array.from(catMap.entries())
     .map(([category, data]) => ({
-      category: category as any,
+      category,
       quantitySold: data.quantity,
       revenueInr: Math.round(data.revenue * 100) / 100,
       productCount: data.products.size,
     }))
-    .sort((a, b) => b.revenueInr - a.revenueInr)
+    .sort((a, b) => b.revenueInr - a.revenueInr);
 }
 
 // ============================================================================

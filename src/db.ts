@@ -306,10 +306,14 @@ export async function seedStarterCatalog(): Promise<void> {
     }
   }
 
-  // 3. Add website products not already in the database (by name match)
+  // 3. Add website products not already in the database (by name AND id).
+  // Dedup by id as well as name: a product whose id already exists (even under
+  // a renamed name) must never be re-inserted via bulkAdd, which would throw a
+  // ConstraintError on the primary key.
   const existingNames = new Set(existing.map((p) => p.name.toLowerCase()))
+  const existingIds = new Set(existing.map((p) => p.id as unknown as string))
   const newWebsiteProducts = VERIFIED_PRODUCTS.filter(
-    (wp) => !existingNames.has(wp.name.toLowerCase())
+    (wp) => !existingNames.has(wp.name.toLowerCase()) && !existingIds.has(wp.id)
   )
 
   if (newWebsiteProducts.length > 0) {

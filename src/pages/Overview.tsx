@@ -9,7 +9,7 @@ import { Select } from '@/components/ui/select'
 import { Plus } from 'lucide-react'
 import { type Product } from '@/types'
 import { getAllProducts, createProduct, updateProduct, deactivateProduct, activateProduct, seedStarterCatalog } from '@/db'
-import { onDataChanged } from '@/lib/events'
+import { onDataChanged, emitDataChanged } from '@/lib/events'
 
 export const CATEGORIES = ['All', 'Coffee', 'Tea', 'Bakery', 'Cold Beverage', 'Signature', 'Merchandise'] as const
 
@@ -46,7 +46,19 @@ export function Overview() {
     setLoading(true)
     setError(null)
     try {
-      await seedStarterCatalog()
+      const existing = await getAllProducts()
+      // Seed only when the catalogue is genuinely empty. Seeding on every load
+      // risks primary-key collisions (bulkAdd uses stable website ids such as
+      // m01–m30) after a product has been renamed or edited.
+      if (existing.length === 0) {
+        try {
+          await seedStarterCatalog()
+        } catch (seedErr) {
+          // Seeding is non-fatal: log it and continue with whatever products
+          // exist so a catalogue sync issue can never take the dashboard offline.
+          console.error('Catalogue seeding failed', seedErr)
+        }
+      }
       const all = await getAllProducts()
       setProducts(all)
     } catch (err) {
@@ -90,6 +102,9 @@ export function Overview() {
     setDialogOpen(false)
     const all = await getAllProducts()
     setProducts(all)
+    // Notify other pages (e.g. Sales Analytics) that catalogue data changed
+    // so category-based analytics recompute with the updated category.
+    emitDataChanged()
   }
 
   async function handleDeactivate(id: string) {

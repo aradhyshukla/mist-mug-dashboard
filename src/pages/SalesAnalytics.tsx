@@ -1,38 +1,53 @@
 /**
- * Mist & Mug — Sales Analytics Page (Phase 2)
+ * Mist & Mug — Sales Analytics Page
  *
- * Real analytics computed from imported transaction data.
- * Time filters: Week | Month | Year | All Time
+ * Real analytics computed from imported transaction data, filtered by a
+ * hierarchical reporting period chosen through the shared
+ * ReportingPeriodNavigator.
+ *
+ * Selection and application are separate states: analytics only change after
+ * the user clicks Apply. All available periods are derived from actual
+ * imported transaction dates, never from the system clock.
  */
 
 import * as React from 'react'
 import { SectionHeader } from '@/components/common/EmptyState'
 import { EmptyState } from '@/components/common/EmptyState'
-import { Clock } from 'lucide-react'
+import { ReportingPeriodNavigator } from '@/components/common/ReportingPeriodNavigator'
 import {
   computeDashboardMetrics,
   computeTopProducts,
   computeHourlyData,
   computeWeekdayWeekend,
   computeDailyTrend,
-  computeCategoryPerformance,
+  computeMonthlyTrend,
+  computeYearlyTrend,
 } from '@/lib/analytics'
+import { getAllImportLines } from '@/db'
+import { resolveSelection, type ResolvedPeriod } from '@/lib/reporting-periods'
+import { useReportingPeriodState } from '@/lib/useReportingPeriodState'
+import type { ProcessedLine } from '@/types'
+import type { TrendBucket } from '@/lib/analytics'
 import { onDataChanged } from '@/lib/events'
+import { formatDate } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { WeekdayWeekendChart } from '@/components/analytics/WeekdayWeekendChart'
+import { TopSellingProducts } from '@/components/analytics/TopSellingProducts'
+import { RevenueTrends } from '@/components/analytics/RevenueTrends'
+import { BusiestHoursChart } from '@/components/analytics/BusiestHoursChart'
+import { Link } from 'react-router-dom'
 
-type TimePeriod = 'week' | 'month' | 'year' | 'all-time'
-
-const PERIODS: Array<{ value: TimePeriod; label: string }> = [
-  { value: 'week', label: 'Week' },
-  { value: 'month', label: 'Month' },
-  { value: 'year', label: 'Year' },
-  { value: 'all-time', label: 'All Time' },
-]
+const ANALYTICS_STORAGE_KEY = 'mistmug:analytics:appliedPeriod'
 
 export function SalesAnalytics() {
-  const [period, setPeriod] = React.useState<TimePeriod>('all-time')
+  const [lines, setLines] = React.useState<ProcessedLine[]>([])
   const [loading, setLoading] = React.useState(true)
+
+  const { applied, setApplied, clearApplied } = useReportingPeriodState({
+    storageKey: ANALYTICS_STORAGE_KEY,
+    lines,
+  })
+
   const [metrics, setMetrics] = React.useState<{
     revenueInr: number
     orderCount: number
@@ -43,38 +58,91 @@ export function SalesAnalytics() {
   const [hourlyData, setHourlyData] = React.useState<Array<any>>([])
   const [weekdayWeekend, setWeekdayWeekend] = React.useState<any>(null)
   const [trendData, setTrendData] = React.useState<Array<any>>([])
-  const [categoryData, setCategoryData] = React.useState<Array<any>>([])
   const [hasData, setHasData] = React.useState(false)
+  const [granularity, setGranularity] = React.useState<'Daily' | 'Monthly' | 'Yearly'>('Daily')
+  const [periodRangeLabel, setPeriodRangeLabel] = React.useState('')
+
+  const [range, setRange] = React.useState<ResolvedPeriod | null>(null)
+
+  // Resolve the applied selection to an inclusive date range whenever it changes.
+  React.useEffect(() => {
+    let resolved: ResolvedPeriod | null = null
+    if (applied) {
+      resolved = resolveSelection(applied, lines) ?? null
+    }
+    setRange(resolved)
+  }, [applied, lines])
+
+  async function loadData() {
+    setLoading(true)
+    try {
+      const all = await getAllImportLines()
+      setLines(all)
+    } finally {
+      setLoading(false)
+    }
+  }
 
   React.useEffect(() => {
-    loadAnalytics()
-  }, [period])
-
-  // Recompute analytics when data changes (e.g., after upload deletion)
-  React.useEffect(() => {
-    const unsubscribe = onDataChanged(() => {
-      loadAnalytics()
-    })
-    return unsubscribe
+    loadData()
   }, [])
 
+  // Recompute when data or applied range changes.
+  React.useEffect(() => {
+    if (!range) return
+    loadAnalytics()
+  }, [range])
+
+  // Recompute when data changes (e.g. after upload deletion or product edit).
+  React.useEffect(() => {
+    const unsubscribe = onDataChanged(() => {
+      loadData()
+      // Product edits don't change import lines, so the [range] effect won't
+      // re-fire. Explicitly recompute analytics so category reattribution takes
+      // effect immediately (e.g. after editing a product category).
+      if (range) loadAnalytics()
+    })
+    return unsubscribe
+  }, [range])
+
   async function loadAnalytics() {
-    setLoading(true)
-    const m = await computeDashboardMetrics()
-    const tp = await computeTopProducts(undefined, undefined, 5)
-    const hd = await computeHourlyData()
-    const ww = await computeWeekdayWeekend()
-    const td = await computeDailyTrend()
-    const cd = await computeCategoryPerformance()
+    const { startDate: start, endDate: end } = range!
+    const m = await computeDashboardMetrics(start, end)
+    const tp = await computeTopProducts(start, end, Infinity)
+    const hd = await computeHourlyData(start, end)
+    const ww = await computeWeekdayWeekend(start, end)
+
+    let granularity: 'Daily' | 'Monthly' | 'Yearly' = 'Daily'
+    let td: TrendBucket[]
+    switch (range!.selection.kind) {
+      case 'year':
+        granularity = 'Monthly'
+        td = await computeMonthlyTrend(start, end)
+        break
+      case 'all-time':
+        granularity = 'Yearly'
+        td = await computeYearlyTrend(start, end)
+        break
+      default:
+        granularity = 'Daily'
+        const daily = await computeDailyTrend(start, end)
+        td = daily.map((d) => ({
+          period: d.date,
+          periodKey: d.date,
+          revenueInr: d.revenueInr,
+          orderCount: d.orderCount,
+          itemsSold: d.itemsSold,
+        }))
+    }
 
     setMetrics(m)
     setTopProducts(tp)
     setHourlyData(hd)
     setWeekdayWeekend(ww)
     setTrendData(td)
-    setCategoryData(cd)
+    setGranularity(granularity)
+    setPeriodRangeLabel(`${formatDate(start)} – ${formatDate(end)}`)
     setHasData(m.orderCount > 0 || m.itemsSold > 0)
-    setLoading(false)
   }
 
   if (loading) {
@@ -85,32 +153,111 @@ export function SalesAnalytics() {
     )
   }
 
+  const hasAnyData = lines.some((l) => l.isValid && !l.isDuplicate && l.date)
+
+  // No sales data at all: empty state with path to Upload Data.
+  if (!hasAnyData) {
+    return (
+      <div className="space-y-8">
+        <SectionHeader
+          title="Sales Analytics"
+          description="Real analytics computed from imported sales data."
+          action={
+            <ReportingPeriodNavigator
+              lines={lines}
+              applied={null}
+              onApply={() => {}}
+              selectLabel="Select Period"
+            />
+          }
+        />
+        <EmptyState
+          title="No sales data yet"
+          description="Import sales files via Upload Data to populate analytics. All calculations use actual historical transaction prices."
+          action={
+            <Button asChild variant="brand" size="sm">
+              <Link to="/upload">Upload Data</Link>
+            </Button>
+          }
+        />
+      </div>
+    )
+  }
+
+  // No period applied yet: prompt the user to select one.
+  if (!applied) {
+    return (
+      <div className="space-y-8">
+        <SectionHeader
+          title="Sales Analytics"
+          description="Real analytics computed from imported sales data. Select a time period to filter results."
+          action={
+            <ReportingPeriodNavigator
+              lines={lines}
+              applied={null}
+              onApply={setApplied}
+              selectLabel="Select Period"
+            />
+          }
+        />
+        <div className="flex flex-col items-center justify-center text-center py-20">
+          <p className="text-rain text-sm font-medium">Select the time period you want to analyze.</p>
+        </div>
+      </div>
+    )
+  }
+
+  // Period applied: show it prominently above the analytics.
+  const resolved = range
   return (
     <div className="space-y-8">
       <SectionHeader
         title="Sales Analytics"
-        description="Real analytics computed from imported sales data. Select a time period to filter results."
+        description="Real analytics computed from imported sales data."
         action={
-          <div className="flex gap-2">
-            {PERIODS.map((p) => (
-              <Button
-                key={p.value}
-                variant={period === p.value ? 'brand' : 'outline'}
-                size="sm"
-                onClick={() => setPeriod(p.value)}
-              >
-                {p.label}
-              </Button>
-            ))}
-          </div>
+          <ReportingPeriodNavigator
+            lines={lines}
+            applied={applied}
+            onApply={setApplied}
+            selectLabel="Select Period"
+          />
         }
       />
 
+      {/* Applied period banner */}
+      {resolved && (
+        <div className="flex items-center justify-between px-0">
+          <div className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-[#d8e8dc]/60 border border-[#1e5e3a]/30 text-[#1e5e3a] text-sm font-medium">
+            <span>Analyzing:</span>
+            <span className="font-serif text-ink">{resolved.label}</span>
+            {resolved.startDate && resolved.endDate && (
+              <span className="text-rain/60 text-xs">
+                {resolved.startDate} → {resolved.endDate}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => clearApplied()}
+              className="text-rain/60 hover:text-rain"
+            >
+              Clear
+            </Button>
+          </div>
+        </div>
+      )}
+
       {!hasData ? (
         <EmptyState
-          title="No sales data yet"
-          description="Import sales files via Upload Data to populate analytics. All calculations use actual historical transaction prices."
-          icon={<Clock className="w-10 h-10 text-rain/30 mx-auto mb-3" />}
+          title="No data for this period"
+          description="No sales transactions were recorded in the selected period. Choose a different period."
+          action={
+            <Button variant="outline" size="sm" onClick={() => setApplied(null)}>
+              Choose another period
+            </Button>
+          }
         />
       ) : (
         <>
@@ -144,47 +291,12 @@ export function SalesAnalytics() {
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Top-Selling Products */}
-            <section className="card-premium p-6 lg:col-span-2">
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="font-serif text-lg text-ink">Top-Selling Products</h3>
-                <Button variant="outline" size="sm" onClick={() => setTopProducts([])}>
-                  View by Quantity
-                </Button>
-              </div>
-              {topProducts.length === 0 ? (
-                <EmptyState title="No products" description="No product data available for this period." />
-              ) : (
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Product</TableHead>
-                        <TableHead>Category</TableHead>
-                        <TableHead>Revenue</TableHead>
-                        <TableHead>Qty Sold</TableHead>
-                        <TableHead>Avg Price</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {topProducts.map((p: any, i: number) => (
-                        <TableRow key={i}>
-                          <TableCell className="text-sm font-medium text-ink">{p.productName}</TableCell>
-                          <TableCell className="text-sm text-rain/60">{p.category}</TableCell>
-                          <TableCell className="text-sm font-serif text-ink">₹{p.revenueInr}</TableCell>
-                          <TableCell className="text-sm text-ink">{p.quantitySold}</TableCell>
-                          <TableCell className="text-sm text-ink">₹{Math.round(p.averageSellingPrice)}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
-            </section>
+            <TopSellingProducts products={topProducts} />
 
             {/* Weekday vs Weekend */}
-            <section className="card-premium p-6">
-              <h3 className="font-serif text-lg text-ink mb-4">Weekday vs Weekend</h3>
-              {weekdayWeekend ? (
+            <WeekdayWeekendChart data={weekdayWeekend} />
+            {weekdayWeekend ? (
+              <section className="card-premium p-6 mt-6">
                 <div className="space-y-4">
                   <div className="grid grid-cols-2 gap-4">
                     <div className="p-4 bg-[#d8e8dc]/30 rounded-lg border border-[#1e5e3a]/30">
@@ -224,108 +336,20 @@ export function SalesAnalytics() {
                     )}
                   </div>
                 </div>
-              ) : (
-                <EmptyState title="No data" description="No weekday/weekend data available." />
-              )}
-            </section>
+              </section>
+            ) : null}
           </div>
 
           {/* Revenue Trends */}
-          <section className="card-premium p-6">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="font-serif text-lg text-ink">Revenue Trends</h3>
-            </div>
-            {trendData.length === 0 ? (
-              <EmptyState title="No trend data" description="No daily trend data available for this period." />
-            ) : (
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Period</TableHead>
-                      <TableHead>Revenue</TableHead>
-                      <TableHead>Orders</TableHead>
-                      <TableHead>Items</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {trendData.map((d: any, i: number) => (
-                      <TableRow key={i}>
-                        <TableCell className="text-sm font-medium text-ink">{d.date}</TableCell>
-                        <TableCell className="text-sm font-serif text-ink">₹{d.revenueInr}</TableCell>
-                        <TableCell className="text-sm text-ink">{d.orderCount}</TableCell>
-                        <TableCell className="text-sm text-ink">{d.itemsSold}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-          </section>
+          <RevenueTrends
+            trendData={trendData}
+            metrics={metrics ?? { revenueInr: 0, orderCount: 0, itemsSold: 0, averageOrderValue: 0 }}
+            periodRangeLabel={periodRangeLabel}
+            granularity={granularity}
+          />
 
-          {/* Category Performance */}
-          <section className="card-premium p-6">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="font-serif text-lg text-ink">Category Performance</h3>
-            </div>
-            {categoryData.length === 0 ? (
-              <EmptyState title="No category data" description="No category data available for this period." />
-            ) : (
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Category</TableHead>
-                      <TableHead>Revenue</TableHead>
-                      <TableHead>Qty Sold</TableHead>
-                      <TableHead>Products</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {categoryData.map((c: any, i: number) => (
-                      <TableRow key={i}>
-                        <TableCell className="text-sm font-medium text-ink">{c.category}</TableCell>
-                        <TableCell className="text-sm font-serif text-ink">₹{c.revenueInr}</TableCell>
-                        <TableCell className="text-sm text-ink">{c.quantitySold}</TableCell>
-                        <TableCell className="text-sm text-ink">{c.productCount}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-          </section>
-
-          {/* Hourly Data */}
-          <section className="card-premium p-6">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="font-serif text-lg text-ink">Busiest Hours</h3>
-            </div>
-            {hourlyData.length === 0 ? (
-              <EmptyState title="No hourly data" description="No hourly data available (time not recorded in upload)." />
-            ) : (
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Hour</TableHead>
-                      <TableHead>Revenue</TableHead>
-                      <TableHead>Orders</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {hourlyData.map((h: any, i: number) => (
-                      <TableRow key={i}>
-                        <TableCell className="text-sm font-medium text-ink">{h.hour}:00</TableCell>
-                        <TableCell className="text-sm font-serif text-ink">₹{h.revenueInr}</TableCell>
-                        <TableCell className="text-sm text-ink">{h.orderCount}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-          </section>
+          {/* Busiest Hours */}
+          <BusiestHoursChart data={hourlyData} />
         </>
       )}
     </div>

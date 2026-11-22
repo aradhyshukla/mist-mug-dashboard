@@ -16,6 +16,7 @@ export type ProductCategory =
   | 'Cold Beverage'
   | 'Signature'
   | 'Merchandise'
+  | 'Unclassified'
 
 export type ProductSource = 'website' | 'user' | 'legacy' | 'starter'
 

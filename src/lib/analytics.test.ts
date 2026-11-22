@@ -13,10 +13,11 @@ vi.mock('@/db', () => ({
     },
   },
   getAllImportLines: vi.fn(),
+  getAllProducts: vi.fn(),
 }))
 
-import { getAllImportLines } from '@/db'
-import { ProcessedLine } from '@/types'
+import { getAllImportLines, getAllProducts } from '@/db'
+import type { ProcessedLine, Product, ProductCategory, ProductId } from '@/types'
 import {
   computeDashboardMetrics,
   computeTopProducts,
@@ -25,10 +26,14 @@ import {
   computeRevenueByDayOfWeek,
   computeWeekdayWeekend,
   computeDailyTrend,
+  computeMonthlyTrend,
+  computeYearlyTrend,
   computeWeeklyBreakdown,
   computeMonthlyBreakdown,
   computeYearlyBreakdown,
   computeCategoryPerformance,
+  computeCategoryRevenue,
+  resolveLineCategory,
 } from '@/lib/analytics'
 
 // Test fixtures with known expected totals
@@ -133,6 +138,7 @@ const FIXTURE_LINES: ProcessedLine[] = [
 
 beforeEach(() => {
   vi.mocked(getAllImportLines).mockResolvedValue(FIXTURE_LINES)
+  vi.mocked(getAllProducts).mockResolvedValue([])
 })
 
 describe('computeDashboardMetrics', () => {
@@ -168,6 +174,23 @@ describe('computeTopProducts', () => {
     expect(croissant.quantitySold).toBe(3)
     expect(products[0].productName).toBe('Almond Croissant')
   })
+
+  it('returns only the top five when limit is five', async () => {
+    const products = await computeTopProducts(undefined, undefined, 5)
+    expect(products).toHaveLength(5)
+    const revenues = products.map((p) => p.revenueInr)
+    expect(revenues).toEqual([...revenues].sort((a, b) => b - a))
+  })
+
+  it('breaks revenue ties deterministically by product name', async () => {
+    vi.mocked(getAllImportLines).mockResolvedValue([
+      { ...FIXTURE_LINES[2], productName: 'Zebra Product', lineTotalInr: 480 },
+      { ...FIXTURE_LINES[4], productName: 'Apple Product', lineTotalInr: 480, quantity: 1 },
+    ])
+    const products = await computeTopProducts(undefined, undefined, 10)
+    expect(products[0].productName).toBe('Apple Product')
+    expect(products[1].productName).toBe('Zebra Product')
+  })
 })
 
 describe('computeTopProductsByQuantity', () => {
@@ -187,30 +210,44 @@ describe('computeHourlyData', () => {
     expect(hour9.orderCount).toBe(1) // txn1 is 1 unique order (was 2 when counting lines)
   })
 
-  it('groups by hour with time serial values', async () => {
-    // txn1 line 1 at 12:00 PM (360 revenue), txn2 at 9:00 AM (480 revenue)
+  it('counts unique orders per hour, not lines', async () => {
     vi.mocked(getAllImportLines).mockResolvedValue([
-      { ...FIXTURE_LINES[0], time: '12:00' },
-      { ...FIXTURE_LINES[2], time: '09:00', transactionId: 'txn2', lineId: '2' },
+      { ...FIXTURE_LINES[0], transactionId: 'txn1', lineId: '1', date: '2024-11-04', time: '09:30', lineTotalInr: 360 },
+      { ...FIXTURE_LINES[1], transactionId: 'txn1', lineId: '2', date: '2024-11-04', time: '09:30', lineTotalInr: 90 },
+      { ...FIXTURE_LINES[2], transactionId: 'txn2', lineId: '1', date: '2024-11-04', time: '09:45', lineTotalInr: 480 },
     ])
     const data = await computeHourlyData()
     const hour9 = data.find((d) => d.hour === 9)!
-    const hour12 = data.find((d) => d.hour === 12)!
-    expect(hour9.revenueInr).toBe(480) // txn2
-    expect(hour9.orderCount).toBe(1)
-    expect(hour12.revenueInr).toBe(360) // txn1 line 1
-    expect(hour12.orderCount).toBe(1)
+    // 3 lines but 2 unique orders at hour 9
+    expect(hour9.revenueInr).toBe(930) // 360 + 90 + 480
+    expect(hour9.orderCount).toBe(2)
   })
 
-  it('groups by hour with time serial numbers', async () => {
-    // 0.5 = 12:00 PM (time serial converted to HH:mm)
+  it('ignores lines with missing or invalid time', async () => {
     vi.mocked(getAllImportLines).mockResolvedValue([
-      { ...FIXTURE_LINES[0], time: '12:00' },
+      { ...FIXTURE_LINES[0], time: '09:30' },
+      { ...FIXTURE_LINES[2], time: undefined },
+      { ...FIXTURE_LINES[4], time: 'not-a-time' },
     ])
     const data = await computeHourlyData()
-    const hour12 = data.find((d) => d.hour === 12)!
-    expect(hour12.revenueInr).toBe(360)
-    expect(hour12.orderCount).toBe(1)
+    expect(data).toHaveLength(1)
+    expect(data[0].hour).toBe(9)
+  })
+
+  it('returns empty array for no data', async () => {
+    vi.mocked(getAllImportLines).mockResolvedValue([])
+    const data = await computeHourlyData()
+    expect(data).toEqual([])
+  })
+
+  it('chronologically orders hours', async () => {
+    vi.mocked(getAllImportLines).mockResolvedValue([
+      { ...FIXTURE_LINES[2], time: '14:15' },
+      { ...FIXTURE_LINES[0], time: '09:30' },
+      { ...FIXTURE_LINES[4], time: '08:00' },
+    ])
+    const data = await computeHourlyData()
+    expect(data.map((d) => d.hour)).toEqual([8, 9, 14])
   })
 })
 
@@ -262,6 +299,36 @@ describe('computeDailyTrend', () => {
   })
 })
 
+describe('computeMonthlyTrend', () => {
+  it('groups by month and reconciles with total revenue', async () => {
+    const data = await computeMonthlyTrend()
+    expect(data.length).toBe(1)
+    expect(data[0].periodKey).toBe('2024-11')
+    expect(data[0].revenueInr).toBe(1610)
+    expect(data[0].orderCount).toBe(5)
+    expect(data[0].itemsSold).toBe(10)
+
+    const sumRevenue = data.reduce((s, d) => s + d.revenueInr, 0)
+    const m = await computeDashboardMetrics()
+    expect(sumRevenue).toBe(m.revenueInr)
+    const sumItems = data.reduce((s, d) => s + d.itemsSold, 0)
+    expect(sumItems).toBe(m.itemsSold)
+  })
+})
+
+describe('computeYearlyTrend', () => {
+  it('groups by year and reconciles with total revenue', async () => {
+    const data = await computeYearlyTrend()
+    expect(data.length).toBe(1)
+    expect(data[0].periodKey).toBe('2024')
+    expect(data[0].revenueInr).toBe(1610)
+
+    const sumRevenue = data.reduce((s, d) => s + d.revenueInr, 0)
+    const m = await computeDashboardMetrics()
+    expect(sumRevenue).toBe(m.revenueInr)
+  })
+})
+
 describe('computeWeeklyBreakdown', () => {
   it('groups by week starting Monday', async () => {
     const data = await computeWeeklyBreakdown()
@@ -295,6 +362,284 @@ describe('computeCategoryPerformance', () => {
     const bakery = data.find((c) => c.category === 'Bakery')!
     expect(bakery.revenueInr).toBe(760) // 480 + 280
     expect(bakery.quantitySold).toBe(5) // 3 + 2
+  })
+})
+
+describe('computeCategoryRevenue', () => {
+  it('groups by verified category and sums revenue', async () => {
+    const data = await computeCategoryRevenue()
+    const bakery = data.find((c) => c.category === 'Bakery')!
+    expect(bakery.revenueInr).toBe(760)
+    expect(bakery.quantitySold).toBe(5)
+  })
+
+  it('reports unknown categories as Unclassified instead of Coffee', async () => {
+    vi.mocked(getAllImportLines).mockResolvedValue([
+      { ...FIXTURE_LINES[0], categoryResolved: 'Coffee' },
+      { ...FIXTURE_LINES[1], categoryResolved: 'Unknown Category' as ProductCategory },
+    ])
+    const data = await computeCategoryRevenue()
+    const coffee = data.find((c) => c.category === 'Coffee')!
+    const unclassified = data.find((c) => c.category === 'Unclassified')!
+    expect(coffee.revenueInr).toBe(360)
+    expect(unclassified.revenueInr).toBe(90)
+    expect(data.find((c) => c.category === 'Coffee')!.revenueInr).toBe(360)
+  })
+
+  it('total category revenue reconciles with overall revenue', async () => {
+    const cats = await computeCategoryRevenue()
+    const catTotal = cats.reduce((s, c) => s + c.revenueInr, 0)
+    const m = await computeDashboardMetrics()
+    expect(catTotal).toBe(m.revenueInr)
+  })
+
+  it('returns empty array for no data', async () => {
+    vi.mocked(getAllImportLines).mockResolvedValue([])
+    const data = await computeCategoryRevenue()
+    expect(data).toEqual([])
+  })
+
+  it('donut percentages sum to 100%', async () => {
+    const data = await computeCategoryRevenue()
+    const total = data.reduce((s, c) => s + c.revenueInr, 0)
+    const pctSum = data.reduce((s, c) => s + (total > 0 ? (c.revenueInr / total) * 100 : 0), 0)
+    expect(Math.round(pctSum)).toBe(100)
+  })
+})
+
+describe('resolveLineCategory', () => {
+  const baseLine: ProcessedLine = {
+    ...FIXTURE_LINES[0],
+    productId: 'p1' as ProductId,
+    productName: 'Landour Latte',
+    categoryResolved: 'Coffee',
+  }
+
+  const products: Product[] = [
+    {
+      id: 'p1' as ProductId,
+      name: 'Landour Latte',
+      category: 'Coffee',
+      currentPriceInr: 220,
+      isActive: true,
+      source: 'website',
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+    },
+    {
+      id: 'p2' as ProductId,
+      name: 'Almond Croissant',
+      category: 'Bakery',
+      currentPriceInr: 160,
+      isActive: true,
+      source: 'website',
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+    },
+  ]
+
+  function lookupFor(products: Product[]) {
+    const byId = new Map<ProductId, Product>()
+    const byName = new Map<string, ProductCategory>()
+    for (const p of products) {
+      byId.set(p.id, p)
+      byName.set(
+        p.name.toString().trim().toLowerCase().replace(/[_\s]+/g, ' ').replace(/[^\w\s]/g, '').trim(),
+        p.category
+      )
+    }
+    return { byId, byName }
+  }
+
+  it('uses verified product ID → catalogue category', () => {
+    const category = resolveLineCategory(baseLine, lookupFor(products))
+    expect(category).toBe('Coffee')
+  })
+
+  it('uses verified normalized exact product-name match when productId absent', () => {
+    const line = { ...baseLine, productId: undefined, productName: '  ALMOND Croissant  ' }
+    const category = resolveLineCategory(line, lookupFor(products))
+    expect(category).toBe('Bakery')
+  })
+
+  it('falls back to verified source transaction category', () => {
+    const line: ProcessedLine = {
+      ...baseLine,
+      productId: undefined,
+      productName: 'Unknown Item',
+      categoryResolved: 'Tea',
+    }
+    const category = resolveLineCategory(line, lookupFor(products))
+    expect(category).toBe('Tea')
+  })
+
+  it('reports unknown/unverified source categories as Unclassified, never Coffee', () => {
+    const line = {
+      ...baseLine,
+      productId: undefined,
+      productName: 'Mystery Item',
+      categoryResolved: 'Unknown Category' as ProductCategory,
+    }
+    const category = resolveLineCategory(line, lookupFor([]))
+    expect(category).toBe('Unclassified')
+  })
+})
+
+describe('category attribution in analytics projections', () => {
+  it('computeTopProducts uses catalogue category, not incorrect stored Coffee', async () => {
+    vi.mocked(getAllProducts).mockResolvedValue([
+      {
+        id: 'p-margherita' as ProductId,
+        name: 'Margherita Pizza',
+        category: 'Bakery',
+        currentPriceInr: 250,
+        isActive: true,
+        source: 'website',
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+      },
+    ])
+    vi.mocked(getAllImportLines).mockResolvedValue([
+      {
+        ...FIXTURE_LINES[2],
+        productId: 'p-margherita' as ProductId,
+        productName: 'Margherita Pizza',
+        categoryResolved: 'Coffee', // incorrectly stored as Coffee
+        lineTotalInr: 480,
+        quantity: 3,
+      },
+    ])
+    const products = await computeTopProducts()
+    const pizza = products.find((p) => p.productName === 'Margherita Pizza')!
+    expect(pizza.category).toBe('Bakery')
+    expect(pizza.category).not.toBe('Coffee')
+  })
+
+  it('computeCategoryRevenue does not misattribute catalogue products to Coffee', async () => {
+    vi.mocked(getAllProducts).mockResolvedValue([
+      {
+        id: 'p-cake' as ProductId,
+        name: 'Chocolate Cake',
+        category: 'Bakery',
+        currentPriceInr: 250,
+        isActive: true,
+        source: 'website',
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+      },
+    ])
+    vi.mocked(getAllImportLines).mockResolvedValue([
+      { ...FIXTURE_LINES[0], productId: 'p-cake' as ProductId, productName: 'Chocolate Cake', categoryResolved: 'Coffee' },
+    ])
+    const data = await computeCategoryRevenue()
+    const bakery = data.find((c) => c.category === 'Bakery')
+    const coffee = data.find((c) => c.category === 'Coffee')
+    expect(bakery?.revenueInr).toBe(360) // catalogue overrides incorrect stored Coffee
+    expect(coffee).toBeUndefined()
+  })
+
+  it('computeCategoryRevenue reports unverified source categories as Unclassified, never Coffee', async () => {
+    vi.mocked(getAllProducts).mockResolvedValue([])
+    vi.mocked(getAllImportLines).mockResolvedValue([
+      { ...FIXTURE_LINES[0], productName: 'Mystery Item', categoryResolved: 'Unknown Category' as ProductCategory },
+    ])
+    const data = await computeCategoryRevenue()
+    const unclassified = data.find((c) => c.category === 'Unclassified')
+    const coffee = data.find((c) => c.category === 'Coffee')
+    expect(unclassified?.revenueInr).toBe(360)
+    expect(coffee).toBeUndefined()
+  })
+
+  it('category totals reconcile with overall revenue', async () => {
+    const cats = await computeCategoryRevenue()
+    const catTotal = cats.reduce((s, c) => s + c.revenueInr, 0)
+    const m = await computeDashboardMetrics()
+    expect(catTotal).toBe(m.revenueInr)
+  })
+
+  it('category reattribution moves revenue from old category to new category', async () => {
+    // Initial state: Margherita Pizza is catalogued as Coffee
+    vi.mocked(getAllProducts).mockResolvedValue([
+      {
+        id: 'p-pizza' as ProductId,
+        name: 'Margherita Pizza',
+        category: 'Coffee',
+        currentPriceInr: 250,
+        isActive: true,
+        source: 'website',
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+      },
+    ])
+    vi.mocked(getAllImportLines).mockResolvedValue([
+      { ...FIXTURE_LINES[2], productId: 'p-pizza' as ProductId, productName: 'Margherita Pizza', categoryResolved: 'Coffee', lineTotalInr: 480, quantity: 3 },
+    ])
+
+    const before = await computeCategoryRevenue()
+    const coffeeBefore = before.find((c) => c.category === 'Coffee')!
+    expect(coffeeBefore.revenueInr).toBe(480)
+    expect(before.find((c) => c.category === 'Bakery')).toBeUndefined()
+
+    // After edit: Margherita Pizza is recatalogued as Bakery
+    vi.mocked(getAllProducts).mockResolvedValue([
+      {
+        id: 'p-pizza' as ProductId,
+        name: 'Margherita Pizza',
+        category: 'Bakery', // changed from Coffee to Bakery
+        currentPriceInr: 250,
+        isActive: true,
+        source: 'website',
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-02T00:00:00Z',
+      },
+    ])
+
+    const after = await computeCategoryRevenue()
+    const coffeeAfter = after.find((c) => c.category === 'Coffee')
+    const bakeryAfter = after.find((c) => c.category === 'Bakery')!
+    expect(coffeeAfter).toBeUndefined() // revenue moved out of Coffee
+    expect(bakeryAfter.revenueInr).toBe(480) // revenue moved into Bakery
+
+    // Total revenue unchanged
+    const afterTotal = after.reduce((s, c) => s + c.revenueInr, 0)
+    const beforeTotal = before.reduce((s, c) => s + c.revenueInr, 0)
+    expect(afterTotal).toBe(beforeTotal)
+  })
+
+  it('category reattribution preserves total revenue across reporting periods', async () => {
+    vi.mocked(getAllProducts).mockResolvedValue([
+      {
+        id: 'p-pizza' as ProductId,
+        name: 'Margherita Pizza',
+        category: 'Bakery',
+        currentPriceInr: 250,
+        isActive: true,
+        source: 'website',
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+      },
+    ])
+    vi.mocked(getAllImportLines).mockResolvedValue([
+      { ...FIXTURE_LINES[2], productId: 'p-pizza' as ProductId, productName: 'Margherita Pizza', categoryResolved: 'Coffee', lineTotalInr: 480, quantity: 3, date: '2026-01-15' },
+    ])
+
+    const cats = await computeCategoryRevenue('2026-01-01', '2026-01-31')
+    const catTotal = cats.reduce((s, c) => s + c.revenueInr, 0)
+    const m = await computeDashboardMetrics('2026-01-01', '2026-01-31')
+    expect(catTotal).toBe(m.revenueInr)
+    expect(m.revenueInr).toBe(480)
+  })
+
+  it('unmatched products are reported as Unclassified, never Coffee', async () => {
+    vi.mocked(getAllProducts).mockResolvedValue([])
+    vi.mocked(getAllImportLines).mockResolvedValue([
+      { ...FIXTURE_LINES[0], productName: 'Unknown Item', categoryResolved: 'Unknown Category' as ProductCategory },
+    ])
+    const data = await computeCategoryRevenue()
+    const unclassified = data.find((c) => c.category === 'Unclassified')
+    const coffee = data.find((c) => c.category === 'Coffee')
+    expect(unclassified?.revenueInr).toBe(360)
+    expect(coffee).toBeUndefined()
   })
 })
 
