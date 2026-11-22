@@ -9,6 +9,7 @@ import { Select } from '@/components/ui/select'
 import { Plus } from 'lucide-react'
 import { type Product } from '@/types'
 import { getAllProducts, createProduct, updateProduct, deactivateProduct, activateProduct, seedStarterCatalog } from '@/db'
+import { onDataChanged, emitDataChanged } from '@/lib/events'
 
 export const CATEGORIES = ['All', 'Coffee', 'Tea', 'Bakery', 'Cold Beverage', 'Signature', 'Merchandise'] as const
 
@@ -33,11 +34,31 @@ export function Overview() {
     loadProducts()
   }, [])
 
+  // Refresh products when data changes (e.g., after upload deletion)
+  React.useEffect(() => {
+    const unsubscribe = onDataChanged(() => {
+      loadProducts()
+    })
+    return unsubscribe
+  }, [])
+
   async function loadProducts() {
     setLoading(true)
     setError(null)
     try {
-      await seedStarterCatalog()
+      const existing = await getAllProducts()
+      // Seed only when the catalogue is genuinely empty. Seeding on every load
+      // risks primary-key collisions (bulkAdd uses stable website ids such as
+      // m01–m30) after a product has been renamed or edited.
+      if (existing.length === 0) {
+        try {
+          await seedStarterCatalog()
+        } catch (seedErr) {
+          // Seeding is non-fatal: log it and continue with whatever products
+          // exist so a catalogue sync issue can never take the dashboard offline.
+          console.error('Catalogue seeding failed', seedErr)
+        }
+      }
       const all = await getAllProducts()
       setProducts(all)
     } catch (err) {
@@ -81,6 +102,9 @@ export function Overview() {
     setDialogOpen(false)
     const all = await getAllProducts()
     setProducts(all)
+    // Notify other pages (e.g. Sales Analytics) that catalogue data changed
+    // so category-based analytics recompute with the updated category.
+    emitDataChanged()
   }
 
   async function handleDeactivate(id: string) {
@@ -156,17 +180,15 @@ export function Overview() {
           <SectionHeader
             title="Product Catalogue"
             description={`Manage ${products.length} product${products.length !== 1 ? 's' : ''}. Prices shown are current catalogue prices in INR (₹).`}
-            action={
-              <Button variant="brand" size="sm" onClick={() => {
-                setEditingProduct(null)
-                setDialogOpen(true)
-              }}>
-                <Plus className="w-4 h-4 mr-2" /> Add Product
-              </Button>
-            }
           />
         </div>
-        <div className="flex-shrink-0">
+        <div className="flex gap-3 flex-shrink-0">
+          <Button variant="brand" size="sm" onClick={() => {
+            setEditingProduct(null)
+            setDialogOpen(true)
+          }}>
+            <Plus className="w-4 h-4 mr-2" /> Add Product
+          </Button>
           <Button variant="brand-gold" size="sm" onClick={() => navigate('/upload')} className="px-6">
             Upload Weekly Sales →
           </Button>

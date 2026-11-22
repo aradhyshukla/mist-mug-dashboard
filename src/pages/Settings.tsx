@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { emitDataChanged } from '@/lib/events'
 import { type Product } from '@/types'
 import {
   getSettings,
@@ -31,18 +32,14 @@ import { cn } from '@/lib/utils'
 export function Settings() {
   const [loading, setLoading] = React.useState(true)
   const [saving, setSaving] = React.useState(false)
+  const [productSaving, setProductSaving] = React.useState(false)
+  const [productError, setProductError] = React.useState<string | null>(null)
 
   // Café profile
   const [cafeName, setCafeName] = React.useState('')
   const [cafeDescription, setCafeDescription] = React.useState('')
   const [location, setLocation] = React.useState('')
   const [contact, setContact] = React.useState('')
-
-  // Display preferences
-  const [currency, setCurrency] = React.useState('INR')
-  const [theme, setTheme] = React.useState<'light' | 'dark'>('light')
-  const [dateFormat, setDateFormat] = React.useState<'DD/MM/YYYY' | 'MM/DD/YYYY' | 'YYYY-MM-DD'>('DD/MM/YYYY')
-  const [chartPreference, setChartPreference] = React.useState<'bars' | 'lines'>('bars')
 
   // Product management
   const [products, setProducts] = React.useState<Product[]>([])
@@ -71,10 +68,6 @@ export function Settings() {
         setCafeDescription(settings.cafeDescription)
         setLocation(settings.location)
         setContact(settings.contact ?? '')
-        setCurrency(settings.currency)
-        setTheme(settings.theme)
-        setDateFormat((settings.dateFormat ?? 'DD/MM/YYYY') as any)
-        setChartPreference((settings.chartPreference ?? 'bars') as any)
       }
       setProducts(allProducts)
     } catch (err) {
@@ -95,11 +88,6 @@ export function Settings() {
         cafeDescription,
         location,
         contact,
-        currency,
-        theme,
-        lowStockThreshold: 5,
-        dateFormat,
-        chartPreference,
       })
     } catch (err) {
       console.error('Failed to save settings', err)
@@ -121,6 +109,12 @@ export function Settings() {
     }
   }
 
+  function closeProductDialog() {
+    setProductDialogOpen(false)
+    setEditingProduct(null)
+    setProductError(null)
+  }
+
   async function handleProductSave(data: {
     name: string
     category: string
@@ -128,26 +122,38 @@ export function Settings() {
     description?: string
     imageUrl?: string
   }) {
-    if (editingProduct) {
-      await updateProduct(editingProduct.id as any, {
-        name: data.name,
-        category: data.category as any,
-        currentPriceInr: data.currentPriceInr,
-        description: data.description,
-        imageUrl: data.imageUrl,
-      })
-      setEditingProduct(null)
-    } else {
-      await createProduct({
-        name: data.name,
-        category: data.category as any,
-        currentPriceInr: data.currentPriceInr,
-        description: data.description,
-        imageUrl: data.imageUrl,
-      } as any)
+    setProductError(null)
+    setProductSaving(true)
+    try {
+      if (editingProduct) {
+        await updateProduct(editingProduct.id as any, {
+          name: data.name,
+          category: data.category as any,
+          currentPriceInr: data.currentPriceInr,
+          description: data.description,
+          imageUrl: data.imageUrl,
+        })
+      } else {
+        await createProduct({
+          name: data.name,
+          category: data.category as any,
+          currentPriceInr: data.currentPriceInr,
+          description: data.description,
+          imageUrl: data.imageUrl,
+        } as any)
+      }
+      closeProductDialog()
+      await loadProducts()
+      // Notify other pages (e.g. Sales Analytics) that catalogue data changed
+      // so category-based analytics recompute with the updated category.
+      emitDataChanged()
+    } catch (err) {
+      setProductError(
+        err instanceof Error ? err.message : 'Failed to save product. Please try again.'
+      )
+    } finally {
+      setProductSaving(false)
     }
-    setProductDialogOpen(false)
-    await loadProducts()
   }
 
   async function handleToggleAvailability(id: string, isActive: boolean) {
@@ -394,44 +400,6 @@ export function Settings() {
           </div>
         </section>
 
-        {/* Display Preferences */}
-        <section className="card-premium p-6">
-          <h3 className="font-serif text-lg text-ink mb-6">Display Preferences</h3>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label>Currency</Label>
-              <Select value={currency} onChange={(e) => setCurrency(e.target.value)}>
-                <option value="INR">Indian Rupee (₹)</option>
-                <option value="USD">US Dollar ($)</option>
-                <option value="EUR">Euro (€)</option>
-                <option value="GBP">British Pound (£)</option>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Theme</Label>
-              <Select value={theme} onChange={(e) => setTheme(e.target.value as any)}>
-                <option value="light">Light</option>
-                <option value="dark">Dark</option>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Date Format</Label>
-              <Select value={dateFormat} onChange={(e) => setDateFormat(e.target.value as any)}>
-                <option value="DD/MM/YYYY">DD/MM/YYYY (e.g. 04/11/2024)</option>
-                <option value="MM/DD/YYYY">MM/DD/YYYY (e.g. 11/04/2024)</option>
-                <option value="YYYY-MM-DD">YYYY-MM-DD (e.g. 2024-11-04)</option>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Chart Display</Label>
-              <Select value={chartPreference} onChange={(e) => setChartPreference(e.target.value as any)}>
-                <option value="bars">Bar charts</option>
-                <option value="lines">Line charts</option>
-              </Select>
-            </div>
-          </div>
-        </section>
-
         <div className="pt-4">
           <Button
             type="submit"
@@ -619,14 +587,14 @@ export function Settings() {
       {/* Product Add/Edit Dialog */}
       {productDialogOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="fixed inset-0 bg-[#142E25]/80 backdrop-blur-sm" onClick={() => setProductDialogOpen(false)} />
-          <div className="bg-paper border border-line p-6 rounded-xl shadow-lg w-full max-w-md">
+          <div className="fixed inset-0 bg-[#142E25]/80 backdrop-blur-sm" onClick={closeProductDialog} />
+          <div className="bg-paper border border-line p-6 rounded-xl shadow-lg w-full max-w-md relative z-10">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-serif text-lg text-ink">
               {editingProduct ? 'Edit Product' : 'Add New Product'}
             </h3>
             <button
-              onClick={() => setProductDialogOpen(false)}
+              onClick={closeProductDialog}
               className="text-rain/60 hover:text-ink"
             >
               ×
@@ -653,7 +621,10 @@ export function Settings() {
             </div>
             <div className="space-y-2">
               <Label>Category</Label>
-              <Select name="category">
+              <Select
+                name="category"
+                defaultValue={editingProduct?.category ?? 'Coffee'}
+              >
                 <option value="Coffee">Coffee</option>
                 <option value="Tea">Tea</option>
                 <option value="Bakery">Bakery</option>
@@ -688,15 +659,23 @@ export function Settings() {
             <div className="flex gap-2">
               <button
                 type="button"
-                onClick={() => setProductDialogOpen(false)}
-                className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-transparent text-forest font-medium text-sm rounded-md border border-forest transition-all hover:bg-forest hover:text-cream"
+                disabled={productSaving}
+                onClick={closeProductDialog}
+                className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-transparent text-forest font-medium text-sm rounded-md border border-forest transition-all hover:bg-forest hover:text-cream disabled:opacity-50 disabled:pointer-events-none"
               >
                 Cancel
               </button>
-              <Button type="submit" variant="brand">
-                {editingProduct ? 'Save Changes' : 'Add Product'}
+              <Button
+                type="submit"
+                variant="brand"
+                disabled={productSaving}
+              >
+                {productSaving ? 'Saving…' : editingProduct ? 'Save Changes' : 'Add Product'}
               </Button>
             </div>
+            {productError && (
+              <p className="mt-2 text-xs text-[#8a2f1d]">{productError}</p>
+            )}
           </form>
         </div>
       </div>

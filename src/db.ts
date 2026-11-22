@@ -9,6 +9,7 @@ import Dexie, { Table } from 'dexie'
 import type {
   Product,
   ProductId,
+  ProductSource,
   TransactionLine,
   UploadBatch,
   UploadBatchId,
@@ -20,6 +21,7 @@ import type {
   ImportResult,
   UploadBatchSummary,
 } from './types'
+import { VERIFIED_PRODUCTS, websiteProductToInput } from './types'
 
 export class MistMugDB extends Dexie {
   products!: Table<Product, ProductId>
@@ -50,6 +52,15 @@ export class MistMugDB extends Dexie {
     })
     this.version(3).stores({
       products: '++id, name, category, isActive, updatedAt',
+      transactions: '++id, productId, category',
+      uploadBatches: '++id, fileName, uploadedAt, status, reportingPeriod',
+      reportingPeriods: '++id, type, startDate, endDate, createdAt',
+      settings: 'id',
+      importLines: '++id, compositeKey, transactionId, date, itemName, categoryResolved, batchId',
+      importBatches: 'id, fileName, uploadedAt, status',
+    })
+    this.version(4).stores({
+      products: '++id, name, category, isActive, updatedAt, source',
       transactions: '++id, productId, category',
       uploadBatches: '++id, fileName, uploadedAt, status, reportingPeriod',
       reportingPeriods: '++id, type, startDate, endDate, createdAt',
@@ -95,6 +106,7 @@ export async function createProduct(input: ProductInput): Promise<ProductId> {
     currentPriceInr: input.currentPriceInr,
     imageUrl: input.imageUrl,
     isActive: input.isActive ?? true,
+    source: input.source ?? 'user',
     createdAt: now,
     updatedAt: now,
   }
@@ -174,64 +186,147 @@ export const STARTER_PRODUCTS: Array<Omit<ProductInput, 'isActive'>> = [
     category: 'Coffee',
     currentPriceInr: 180,
     description: 'Single-origin pour-over brewed with beans from the hills above Mussoorie.',
+    source: 'starter',
   },
   {
     name: 'Mist & Mug Masala Chai',
     category: 'Tea',
     currentPriceInr: 90,
     description: 'Traditional spiced tea simmered with cardamom, ginger and clove.',
+    source: 'starter',
   },
   {
     name: 'Almond Croissant',
     category: 'Bakery',
     currentPriceInr: 160,
     description: 'Buttery croissant filled with almond frangipane, baked fresh each morning.',
+    source: 'starter',
   },
   {
     name: 'Cold Brew with Honey Foam',
     category: 'Cold Beverage',
     currentPriceInr: 190,
     description: 'Slow-steeped cold coffee topped with whipped honey foam.',
+    source: 'starter',
   },
   {
     name: 'Signature Mist Latte',
     category: 'Signature',
     currentPriceInr: 210,
     description: 'Espresso, steamed milk and a hint of lavender syrup — our house favourite.',
+    source: 'starter',
   },
   {
     name: 'Blueberry Muffin',
     category: 'Bakery',
     currentPriceInr: 140,
     description: 'Moist muffin bursting with plump blueberries and a crumble top.',
+    source: 'starter',
   },
   {
     name: 'Iced Matcha',
     category: 'Cold Beverage',
     currentPriceInr: 170,
     description: 'Ceremonial-grade matcha whisked with chilled oat milk.',
+    source: 'starter',
   },
   {
     name: 'Mist & Mug Tote',
     category: 'Merchandise',
     currentPriceInr: 450,
     description: 'Organic cotton tote bag with the café logo.',
+    source: 'starter',
   },
 ]
 
 export async function seedStarterCatalog(): Promise<void> {
-  const existing = await db.products.count()
-  if (existing > 0) return
+  const existing = await db.products.toArray()
   const now = new Date().toISOString()
-  await db.products.bulkAdd(
-    STARTER_PRODUCTS.map((p) => ({
-      ...p,
-      id: generateId() as ProductId,
-      isActive: true,
-      createdAt: now,
-      updatedAt: now,
-    })) as Product[]
+
+  // Old fictional starter product names (used to identify legacy seeded products
+  // that lack a source field)
+  const oldStarterNames = new Set(STARTER_PRODUCTS.map((p) => p.name))
+
+  // Website product names (for deduplication)
+  // Separate existing products into groups
+  const starterProducts: Product[] = []
+  const legacyStarterProducts: Product[] = [] // products with old fictional names but no source field
+  const otherProducts: Product[] = []
+
+  for (const p of existing) {
+    if (p.source === 'starter') {
+      starterProducts.push(p)
+    } else if (oldStarterNames.has(p.name) && (p.source === 'legacy' || !p.source)) {
+      legacyStarterProducts.push(p)
+    } else {
+      otherProducts.push(p)
+    }
+  }
+
+  // 1. Replace old fictional starter products with verified website versions
+  for (const old of starterProducts) {
+    const websiteMatch = VERIFIED_PRODUCTS.find((wp) => wp.name === old.name)
+    if (websiteMatch) {
+      const input = websiteProductToInput(websiteMatch)
+      await db.products.update(old.id as ProductId, {
+        name: input.name,
+        category: input.category,
+        currentPriceInr: input.currentPriceInr,
+        description: input.description,
+        source: 'website' as ProductSource,
+        updatedAt: now,
+      } as Partial<Product>)
+    } else {
+      // No website match — deactivate, don't delete (preserve history)
+      await db.products.update(old.id as ProductId, {
+        isActive: false,
+        updatedAt: now,
+      } as Partial<Product>)
+    }
+  }
+
+  // 2. Deactivate legacy fictional products (old names, no source field)
+  for (const old of legacyStarterProducts) {
+    const websiteMatch = VERIFIED_PRODUCTS.find((wp) => wp.name === old.name)
+    if (websiteMatch) {
+      const input = websiteProductToInput(websiteMatch)
+      await db.products.update(old.id as ProductId, {
+        name: input.name,
+        category: input.category,
+        currentPriceInr: input.currentPriceInr,
+        description: input.description,
+        source: 'website' as ProductSource,
+        updatedAt: now,
+      } as Partial<Product>)
+    } else {
+      await db.products.update(old.id as ProductId, {
+        isActive: false,
+        updatedAt: now,
+      } as Partial<Product>)
+    }
+  }
+
+  // 3. Add website products not already in the database (by name AND id).
+  // Dedup by id as well as name: a product whose id already exists (even under
+  // a renamed name) must never be re-inserted via bulkAdd, which would throw a
+  // ConstraintError on the primary key.
+  const existingNames = new Set(existing.map((p) => p.name.toLowerCase()))
+  const existingIds = new Set(existing.map((p) => p.id as unknown as string))
+  const newWebsiteProducts = VERIFIED_PRODUCTS.filter(
+    (wp) => !existingNames.has(wp.name.toLowerCase()) && !existingIds.has(wp.id)
   )
+
+  if (newWebsiteProducts.length > 0) {
+    await db.products.bulkAdd(
+      newWebsiteProducts.map((wp) => ({
+        ...websiteProductToInput(wp),
+        id: wp.id as ProductId, // use website ID as stable identifier
+        isActive: true,
+        createdAt: now,
+        updatedAt: now,
+      })) as Product[]
+    )
+  }
 }
 
 // ============================================================================
@@ -250,7 +345,7 @@ export async function getImportLinesByDateRange(startDate: string, endDate: stri
 }
 
 export async function getImportLinesByBatch(batchId: UploadBatchId): Promise<ProcessedLine[]> {
-  return db.importLines.where('transactionId').startsWith(batchId).toArray()
+  return db.importLines.where('batchId').equals(batchId).toArray()
 }
 
 export async function getDistinctCompositeKeys(): Promise<string[]> {

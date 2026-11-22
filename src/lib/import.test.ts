@@ -8,11 +8,15 @@ import {
   mapHeaderToField,
   suggestColumnMapping,
   parseDateValue,
+  parseTimeValue,
   parseNumber,
   processRows,
+  repairStoredDatesAndTimes,
 } from '@/lib/import'
-import { db, saveImportResult, removeImportBatch } from '@/db'
-import type { ImportResult, ProcessedLine, UploadBatchId } from '@/types'
+import { db, saveImportResult, removeImportBatch, seedStarterCatalog, getImportLinesByBatch } from '@/db'
+import type { ImportResult, ProcessedLine, Product, ProductId, UploadBatchId } from '@/types'
+import { emitDataChanged, onDataChanged } from '@/lib/events'
+import { getLatestTransactionDate } from '@/lib/analytics'
 
 describe('normalizeHeader', () => {
   it('normalizes headers to lowercase with single spaces', () => {
@@ -179,9 +183,270 @@ describe('parseDateValue', () => {
     expect(result.date).toBeNull()
     expect(result.error).toBe('Missing date')
   })
+
+  it('parses JavaScript Date objects (SheetJS cellDates output)', () => {
+    const date = new Date(Date.UTC(2026, 0, 15)) // 2026-01-15
+    const result = parseDateValue(date)
+    expect(result.date).toBe('2026-01-15')
+    expect(result.error).toBeNull()
+  })
+
+  it('rejects invalid Date objects', () => {
+    const result = parseDateValue(new Date('invalid'))
+    expect(result.date).toBeNull()
+    expect(result.error).toBeTruthy()
+  })
 })
 
-describe('parseNumber', () => {
+describe('parseTimeValue', () => {
+  it('parses JavaScript Date objects', () => {
+    const date = new Date(Date.UTC(2026, 0, 15, 14, 30, 0))
+    const result = parseTimeValue(date)
+    expect(result.time).toBe('14:30')
+    expect(result.error).toBeNull()
+  })
+
+  it('parses Excel time serials (fraction of day)', () => {
+    // 0.5 = 12:00 PM (half of a day)
+    const result = parseTimeValue(0.5)
+    expect(result.time).toBe('12:00')
+    expect(result.error).toBeNull()
+  })
+
+  it('parses Excel time serial 0.25 (6:00 AM)', () => {
+    const result = parseTimeValue(0.25)
+    expect(result.time).toBe('06:00')
+    expect(result.error).toBeNull()
+  })
+
+  it('parses HH:mm strings', () => {
+    const result = parseTimeValue('14:30')
+    expect(result.time).toBe('14:30')
+    expect(result.error).toBeNull()
+  })
+
+  it('parses HH:mm:ss strings', () => {
+    const result = parseTimeValue('09:15:45')
+    expect(result.time).toBe('09:15')
+    expect(result.error).toBeNull()
+  })
+
+  it('rejects invalid times', () => {
+    const result = parseTimeValue('not-a-time')
+    expect(result.time).toBeNull()
+    expect(result.error).toBeTruthy()
+  })
+
+  it('rejects empty values', () => {
+    const result = parseTimeValue('')
+    expect(result.time).toBeNull()
+    expect(result.error).toBe('Missing time')
+  })
+
+  it('rejects out-of-range time serials', () => {
+    const result = parseTimeValue(1.5)
+    expect(result.time).toBeNull()
+    expect(result.error).toBeTruthy()
+  })
+})
+
+describe('repairStoredDatesAndTimes', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  const mockTransaction = () =>
+    vi
+      .spyOn(db, 'transaction' as any)
+      .mockImplementation(async (...args: any[]) => {
+        const fn = args.pop()
+        await fn()
+      })
+
+  it('repairs malformed date strings', async () => {
+    const lines = [
+      {
+        id: 1,
+        compositeKey: 'txn1|Coffee|2026-01-01',
+        transactionId: 'txn1',
+        date: 'Thu Jan 01 2026 00:00:00 GMT+0530 (India Standard Time)',
+        time: '12:00',
+        itemName: 'Coffee',
+        categoryResolved: 'Coffee',
+        quantity: 2,
+        unitPriceInr: 180,
+        lineTotalInr: 360,
+        productId: undefined,
+        productName: 'Coffee',
+        validationIssues: [],
+        isValid: true,
+        isDuplicate: false,
+      },
+    ]
+
+    vi.spyOn(db.importLines, 'toArray').mockResolvedValue(lines)
+    const putSpy = vi.spyOn(db.importLines, 'put').mockResolvedValue(undefined as any)
+    mockTransaction()
+
+    const result = await repairStoredDatesAndTimes()
+
+    expect(result.repaired).toBe(1)
+    expect(result.unrepaired).toBe(0)
+    expect(putSpy).toHaveBeenCalledTimes(1)
+    const stored = putSpy.mock.calls[0][0]
+    expect(stored.date).toBe('2026-01-01')
+  })
+
+  it('repairs malformed time strings', async () => {
+    const lines = [
+      {
+        id: 1,
+        compositeKey: 'txn1|Coffee|2026-01-01',
+        transactionId: 'txn1',
+        date: '2026-01-01',
+        time: 'Sat Dec 30 1899 15:36:00 GMT+0521 (India Standard Time)',
+        itemName: 'Coffee',
+        categoryResolved: 'Coffee',
+        quantity: 2,
+        unitPriceInr: 180,
+        lineTotalInr: 360,
+        productId: undefined,
+        productName: 'Coffee',
+        validationIssues: [],
+        isValid: true,
+        isDuplicate: false,
+      },
+    ]
+
+    vi.spyOn(db.importLines, 'toArray').mockResolvedValue(lines)
+    const putSpy = vi.spyOn(db.importLines, 'put').mockResolvedValue(undefined as any)
+    mockTransaction()
+
+    const result = await repairStoredDatesAndTimes()
+
+    expect(result.repaired).toBe(1)
+    expect(result.unrepaired).toBe(0)
+    expect(putSpy).toHaveBeenCalledTimes(1)
+    const stored = putSpy.mock.calls[0][0]
+    expect(stored.time).toBe('15:36')
+  })
+
+  it('skips already-canonical records', async () => {
+    const lines = [
+      {
+        id: 1,
+        compositeKey: 'txn1|Coffee|2026-01-01',
+        transactionId: 'txn1',
+        date: '2026-01-01',
+        time: '12:00',
+        itemName: 'Coffee',
+        categoryResolved: 'Coffee',
+        quantity: 2,
+        unitPriceInr: 180,
+        lineTotalInr: 360,
+        productId: undefined,
+        productName: 'Coffee',
+        validationIssues: [],
+        isValid: true,
+        isDuplicate: false,
+      },
+    ]
+
+    vi.spyOn(db.importLines, 'toArray').mockResolvedValue(lines)
+    const putSpy = vi.spyOn(db.importLines, 'put').mockResolvedValue(undefined as any)
+    mockTransaction()
+
+    const result = await repairStoredDatesAndTimes()
+
+    expect(result.repaired).toBe(0)
+    expect(result.unrepaired).toBe(0)
+    expect(putSpy).not.toHaveBeenCalled()
+  })
+
+  it('reports unreparable records', async () => {
+    const lines = [
+      {
+        id: 1,
+        compositeKey: 'txn1|Coffee|garbage-date',
+        transactionId: 'txn1',
+        date: 'not-a-date-at-all',
+        time: '12:00',
+        itemName: 'Coffee',
+        categoryResolved: 'Coffee',
+        quantity: 2,
+        unitPriceInr: 180,
+        lineTotalInr: 360,
+        productId: undefined,
+        productName: 'Coffee',
+        validationIssues: [],
+        isValid: true,
+        isDuplicate: false,
+      },
+    ]
+
+    vi.spyOn(db.importLines, 'toArray').mockResolvedValue(lines)
+    const putSpy = vi.spyOn(db.importLines, 'put').mockResolvedValue(undefined as any)
+    mockTransaction()
+
+    const result = await repairStoredDatesAndTimes()
+
+    expect(result.repaired).toBe(0)
+    expect(result.unrepaired).toBe(1)
+    expect(putSpy).not.toHaveBeenCalled()
+    expect(result.unrepairedLines[0].compositeKey).toBe('txn1|Coffee|garbage-date')
+    expect(result.unrepairedLines[0].reason).toContain('Date')
+  })
+
+  it('is idempotent - running twice makes no changes the second time', async () => {
+    const lines = [
+      {
+        id: 1,
+        compositeKey: 'txn1|Coffee|2026-01-01',
+        transactionId: 'txn1',
+        date: '2026-01-01',
+        time: '12:00',
+        itemName: 'Coffee',
+        categoryResolved: 'Coffee',
+        quantity: 2,
+        unitPriceInr: 180,
+        lineTotalInr: 360,
+        productId: undefined,
+        productName: 'Coffee',
+        validationIssues: [],
+        isValid: true,
+        isDuplicate: false,
+      },
+    ]
+
+    vi.spyOn(db.importLines, 'toArray').mockResolvedValue(lines)
+    const putSpy = vi.spyOn(db.importLines, 'put').mockResolvedValue(undefined as any)
+    mockTransaction()
+
+    const result1 = await repairStoredDatesAndTimes()
+    expect(result1.repaired).toBe(0)
+    expect(putSpy).not.toHaveBeenCalled()
+
+    // Run again - same result
+    const result2 = await repairStoredDatesAndTimes()
+    expect(result2.repaired).toBe(0)
+    expect(result2.unrepaired).toBe(0)
+  })
+
+  it('returns empty results for empty database', async () => {
+    vi.spyOn(db.importLines, 'toArray').mockResolvedValue([])
+    const putSpy = vi.spyOn(db.importLines, 'put').mockResolvedValue(undefined as any)
+    mockTransaction()
+
+    const result = await repairStoredDatesAndTimes()
+
+    expect(result.repaired).toBe(0)
+    expect(result.unrepaired).toBe(0)
+    expect(result.unrepairedLines).toHaveLength(0)
+    expect(putSpy).not.toHaveBeenCalled()
+  })
+})
+
+describe('processRows', () => {
   it('parses numbers', () => {
     const result = parseNumber(180)
     expect(result.number).toBe(180)
@@ -261,6 +526,27 @@ describe('processRows', () => {
     const preview = processRows(invalidRows, headers, mapping)
     expect(preview.rejectedCount).toBe(1)
     expect(preview.canImport).toBe(false)
+  })
+
+  it('processes rows with Date objects as date values (SheetJS cellDates output)', () => {
+    const rowsWithDateObjects = [
+      { 'Transaction ID': 'txn1', Date: new Date(Date.UTC(2024, 10, 4)), 'Item Name': 'Coffee', Qty: 2, 'Unit Price': 180, 'Total Amount': 360 },
+    ]
+    const preview = processRows(rowsWithDateObjects, headers, mapping)
+    expect(preview.acceptedCount).toBe(1)
+    expect(preview.allLines[0].date).toBe('2024-11-04')
+  })
+
+  it('processes rows with time serials as time values', () => {
+    const rowsWithTimeSerials = [
+      { 'Transaction ID': 'txn1', Date: '2024-11-04', 'Item Name': 'Coffee', Qty: 2, 'Unit Price': 180, 'Total Amount': 360, Time: 0.5 }, // 12:00 PM
+    ]
+    // Add Time to headers
+    const headersWithTime = [...headers, 'Time']
+    const mappingWithTime = { ...mapping, time: 'Time' }
+    const preview = processRows(rowsWithTimeSerials, headersWithTime, mappingWithTime)
+    expect(preview.acceptedCount).toBe(1)
+    expect(preview.allLines[0].time).toBe('12:00')
   })
 })
 
@@ -586,3 +872,440 @@ describe('removeImportBatch', () => {
     expect(deleteLineSpy).not.toHaveBeenCalled() // shared line is not deleted
   })
 })
+
+// ============================================================================
+// Issue 1: Catalogue synchronisation tests
+// ============================================================================
+
+describe('seedStarterCatalog (catalogue sync)', () => {
+  function makeProduct(overrides: Partial<Product> = {}): Product {
+    return {
+      id: 'prod_test_' + Math.random().toString(36).slice(2) as ProductId,
+      name: 'Test Product',
+      category: 'Coffee',
+      currentPriceInr: 100,
+      description: 'Test',
+      imageUrl: undefined,
+      isActive: true,
+      source: 'user',
+      createdAt: '2024-01-01T00:00:00.000Z',
+      updatedAt: '2024-01-01T00:00:00.000Z',
+      ...overrides,
+    }
+  }
+
+  const mockProductDb = (products: Product[]) => {
+    vi.spyOn(db.products, 'toArray').mockResolvedValue(products)
+    const updateSpy = vi.spyOn(db.products, 'update').mockResolvedValue(undefined as any)
+    const bulkAddSpy = vi.spyOn(db.products, 'bulkAdd').mockResolvedValue(undefined as any)
+    const countSpy = vi.spyOn(db.products, 'count').mockResolvedValue(products.length)
+    return { updateSpy, bulkAddSpy, countSpy }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('seeds website products when database is empty', async () => {
+    const { bulkAddSpy } = mockProductDb([])
+    await seedStarterCatalog()
+    expect(bulkAddSpy).toHaveBeenCalledTimes(1)
+    const stored = bulkAddSpy.mock.calls[0][0]
+    expect(stored).toHaveLength(30) // 30 website products
+    // All should be website source
+    expect(stored.every((p) => p.source === 'website')).toBe(true)
+    // All should use website IDs (m01-m30)
+    expect(stored.every((p, i) => p.id === `m${String(i + 1).padStart(2, '0')}`)).toBe(true)
+  })
+
+  it('replaces old fictional starter products with website versions', async () => {
+    const oldProducts: Product[] = [
+      makeProduct({ name: 'Himalayan Cloud Coffee', source: 'starter', id: 'old1' as ProductId }),
+      makeProduct({ name: 'Mist & Mug Masala Chai', source: 'starter', id: 'old2' as ProductId }),
+      makeProduct({ name: 'Almond Croissant', source: 'starter', id: 'old3' as ProductId }),
+    ]
+    const { updateSpy, bulkAddSpy } = mockProductDb(oldProducts)
+    await seedStarterCatalog()
+
+    // Old fictional products should be updated/deactivated, not left as-is
+    const updateCalls = updateSpy.mock.calls
+    // Himalayan Cloud Coffee is not on website → should be deactivated
+    const coffeeUpdate = updateCalls.find((c) => c[0] === 'old1')
+    expect(coffeeUpdate).toBeDefined()
+    expect((coffeeUpdate as any[])[1].isActive).toBe(false)
+
+    // Mist & Mug Masala Chai is not on website (Pahadi Masala Chai is) → deactivated
+    const chaiUpdate = updateCalls.find((c) => c[0] === 'old2')
+    expect(chaiUpdate).toBeDefined()
+    expect((chaiUpdate as any[])[1].isActive).toBe(false)
+
+    // Almond Croissant is not on website (French Butter Croissant is) → deactivated
+    const croissantUpdate = updateCalls.find((c) => c[0] === 'old3')
+    expect(croissantUpdate).toBeDefined()
+    expect((croissantUpdate as any[])[1].isActive).toBe(false)
+
+    // All 30 website products should be added
+    expect(bulkAddSpy).toHaveBeenCalledTimes(1)
+    const stored = bulkAddSpy.mock.calls[0][0]
+    expect(stored).toHaveLength(30)
+  })
+
+  it('preserves user-created products', async () => {
+    const userProduct = makeProduct({ name: "User's Special Blend", source: 'user', id: 'user1' as ProductId })
+    const { updateSpy } = mockProductDb([userProduct])
+    await seedStarterCatalog()
+    // User product should NOT be touched
+    expect(updateSpy).not.toHaveBeenCalledWith('user1', expect.anything())
+  })
+
+  it('does not create duplicate website products if already present', async () => {
+    const existingWebsite = makeProduct({
+      name: 'Landour Latte',
+      source: 'website',
+      id: 'm01' as ProductId,
+      currentPriceInr: 220,
+    })
+    const { bulkAddSpy } = mockProductDb([existingWebsite])
+    await seedStarterCatalog()
+    // Should add 29 website products (m01 already exists), not 30
+    const stored = bulkAddSpy.mock.calls[0][0]
+    expect(stored).toHaveLength(29)
+    expect(stored.some((p) => p.id === 'm01')).toBe(false)
+  })
+
+  it('does not re-insert a website product whose id exists under a renamed name', async () => {
+    // Simulates a user-edited product: id 'm01' exists but was renamed away from
+    // 'Landour Latte'. bulkAdd must not try to re-add Landour Latte with id 'm01',
+    // which would throw a ConstraintError on the primary key.
+    const renamedProduct = makeProduct({
+      name: 'Mountain Brew',
+      source: 'user',
+      id: 'm01' as ProductId,
+      currentPriceInr: 250,
+    })
+    const { bulkAddSpy } = mockProductDb([renamedProduct])
+    await seedStarterCatalog()
+    // m01 is taken by the renamed product, so Landour Latte (id m01) is skipped.
+    const stored = bulkAddSpy.mock.calls[0][0]
+    expect(stored).toHaveLength(29)
+    expect(stored.some((p) => p.id === 'm01')).toBe(false)
+    // The renamed user product is not overwritten (no update call for m01).
+    expect(bulkAddSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('maps website categories to dashboard categories correctly', async () => {
+    const { bulkAddSpy } = mockProductDb([])
+    await seedStarterCatalog()
+    const stored = bulkAddSpy.mock.calls[0][0]
+
+    // COFFEE hot items → Coffee
+    const landourLatte = stored.find((p) => p.id === 'm01')
+    expect(landourLatte?.category).toBe('Coffee')
+
+    // Cold Brew → Cold Beverage (cold coffee item)
+    const coldBrew = stored.find((p) => p.id === 'm06')
+    expect(coldBrew?.category).toBe('Cold Beverage')
+
+    // Orange Espresso Tonic → Cold Beverage
+    const orangeEspresso = stored.find((p) => p.id === 'm07')
+    expect(orangeEspresso?.category).toBe('Cold Beverage')
+
+    // MOUNTAIN WARMERS → Tea
+    const masalaChai = stored.find((p) => p.id === 'm09')
+    expect(masalaChai?.category).toBe('Tea')
+
+    // BREAKFAST → Bakery
+    const croissant = stored.find((p) => p.id === 'm14')
+    expect(croissant?.category).toBe('Bakery')
+
+    // SMALL PLATES → Signature
+    const cheeseToast = stored.find((p) => p.id === 'm20')
+    expect(cheeseToast?.category).toBe('Signature')
+
+    // SWEET → Signature
+    const cheesecake = stored.find((p) => p.id === 'm25')
+    expect(cheesecake?.category).toBe('Signature')
+  })
+
+  it('preserves website product names and prices', async () => {
+    const { bulkAddSpy } = mockProductDb([])
+    await seedStarterCatalog()
+    const stored = bulkAddSpy.mock.calls[0][0]
+
+    // Spot-check several products against website data
+    expect(stored.find((p) => p.id === 'm01')?.name).toBe('Landour Latte')
+    expect(stored.find((p) => p.id === 'm01')?.currentPriceInr).toBe(220)
+    expect(stored.find((p) => p.id === 'm04')?.name).toBe('Espresso')
+    expect(stored.find((p) => p.id === 'm04')?.currentPriceInr).toBe(140)
+    expect(stored.find((p) => p.id === 'm09')?.name).toBe('Pahadi Masala Chai')
+    expect(stored.find((p) => p.id === 'm09')?.currentPriceInr).toBe(130)
+    expect(stored.find((p) => p.id === 'm14')?.name).toBe('French Butter Croissant')
+    expect(stored.find((p) => p.id === 'm14')?.currentPriceInr).toBe(160)
+    expect(stored.find((p) => p.id === 'm25')?.name).toBe('Burnt Basque Cheesecake')
+    expect(stored.find((p) => p.id === 'm25')?.currentPriceInr).toBe(260)
+    expect(stored.find((p) => p.id === 'm30')?.name).toBe('Walnut Banana Loaf')
+    expect(stored.find((p) => p.id === 'm30')?.currentPriceInr).toBe(190)
+  })
+
+  it('is idempotent - running twice does not duplicate products', async () => {
+    const { bulkAddSpy: bulkAddSpy1 } = mockProductDb([])
+    await seedStarterCatalog()
+    const firstRunStored = bulkAddSpy1.mock.calls[0][0]
+    expect(firstRunStored).toHaveLength(30)
+
+    // Second run: all 30 website products already exist, so no new products added
+    mockProductDb(firstRunStored as Product[])
+    await seedStarterCatalog()
+    const bulkAddSpy2 = vi.spyOn(db.products, 'bulkAdd')
+    // If no products need adding, bulkAdd is never called
+    if (bulkAddSpy2.mock.calls.length > 0) {
+      const secondRunStored = bulkAddSpy2.mock.calls[0][0]
+      expect(secondRunStored).toHaveLength(0)
+    } else {
+      expect(bulkAddSpy2).not.toHaveBeenCalled()
+    }
+  })
+})
+
+// ============================================================================
+// Issue 2: Sales upload deletion tests
+// ============================================================================
+
+describe('Issue 2: Upload deletion and analytics refresh', () => {
+  function makeLine(
+    compositeKey: string,
+    transactionId: string,
+    isValid = true,
+    isDuplicate = false,
+  ): ProcessedLine {
+    return {
+      compositeKey,
+      transactionId,
+      lineId: undefined,
+      date: '2024-11-04',
+      time: undefined,
+      itemName: 'Coffee',
+      categoryResolved: 'Coffee',
+      quantity: 2,
+      unitPriceInr: 180,
+      lineTotalInr: 360,
+      productId: undefined,
+      productName: 'Coffee',
+      validationIssues: [],
+      isValid,
+      isDuplicate,
+    }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  describe('getImportLinesByBatch', () => {
+    it('filters by batchId not transactionId', async () => {
+      const lines = [
+        { ...makeLine('txn1|Coffee|2024-11-04', 'txn1', true, false), batchId: 'batch_A' as UploadBatchId },
+        { ...makeLine('txn2|Tea|2024-11-04', 'txn2', true, false), batchId: 'batch_B' as UploadBatchId },
+      ]
+      vi.spyOn(db.importLines, 'where').mockReturnValue({
+        equals: vi.fn().mockReturnValue({
+          toArray: vi.fn().mockResolvedValue([lines[0]]),
+        }),
+      } as unknown as any)
+
+      const result = await getImportLinesByBatch('batch_A' as UploadBatchId)
+
+      expect(result).toHaveLength(1)
+      expect(result[0].transactionId).toBe('txn1')
+    })
+  })
+
+  describe('emitDataChanged', () => {
+    it('dispatches a custom event on window', () => {
+      const listener = vi.fn()
+      window.addEventListener('mistmug:data-changed', listener)
+      emitDataChanged()
+      expect(listener).toHaveBeenCalledTimes(1)
+      window.removeEventListener('mistmug:data-changed', listener)
+    })
+
+    it('onDataChanged subscribes and unsubscribes correctly', () => {
+      const listener = vi.fn()
+      const unsubscribe = onDataChanged(listener)
+      window.dispatchEvent(new CustomEvent('mistmug:data-changed'))
+      expect(listener).toHaveBeenCalledTimes(1)
+      unsubscribe()
+      window.dispatchEvent(new CustomEvent('mistmug:data-changed'))
+      expect(listener).toHaveBeenCalledTimes(1) // still 1, unsubscribed
+    })
+  })
+
+  describe('removeImportBatch with shared lines', () => {
+    it('does not delete lines owned by another batch', async () => {
+      // txn1 exists in both batch_A and batch_B (same compositeKey)
+      const linesInDb = [
+        {
+          ...makeLine('txn1|Coffee|2024-11-04', 'txn1', true, false),
+          batchId: 'batch_A' as UploadBatchId,
+          id: 1,
+        },
+        {
+          ...makeLine('txn1|Coffee|2024-11-04', 'txn1', true, false),
+          batchId: 'batch_B' as UploadBatchId,
+          id: 2,
+        },
+      ]
+      const deleteLineSpy = vi.spyOn(db.importLines, 'delete').mockResolvedValue(undefined as any)
+      const deleteBatchSpy = vi.spyOn(db.importBatches, 'delete').mockResolvedValue(undefined as any)
+      vi.spyOn(db.importBatches, 'get').mockResolvedValue(linesInDb[0] as any)
+      vi.spyOn(db.importLines, 'toArray').mockResolvedValue(linesInDb)
+      // compositeKey count = 2 (shared across batches)
+      vi.spyOn(db.importLines, 'where').mockReturnValue({
+        equals: vi.fn().mockReturnValue({
+          count: vi.fn().mockResolvedValue(2),
+        }),
+      } as unknown as any)
+      const mockTransaction = () =>
+        vi
+          .spyOn(db, 'transaction' as any)
+          .mockImplementation(async (...args: any[]) => {
+            const fn = args.pop()
+            await fn()
+          })
+      mockTransaction()
+
+      await removeImportBatch('batch_A' as UploadBatchId)
+
+      expect(deleteBatchSpy).toHaveBeenCalledWith('batch_A')
+      // Line should NOT be deleted because it's shared with batch_B
+      expect(deleteLineSpy).not.toHaveBeenCalled()
+    })
+
+    it('deletes lines exclusively owned by the batch', async () => {
+      const linesInDb = [
+        { ...makeLine('txn1|Coffee|2024-11-04', 'txn1', true, false), batchId: 'batch_A' as UploadBatchId, id: 1 },
+        { ...makeLine('txn2|Tea|2024-11-04', 'txn2', true, false), batchId: 'batch_B' as UploadBatchId, id: 2 },
+      ]
+      const deleteLineSpy = vi.spyOn(db.importLines, 'delete').mockResolvedValue(undefined as any)
+      const deleteBatchSpy = vi.spyOn(db.importBatches, 'delete').mockResolvedValue(undefined as any)
+      vi.spyOn(db.importBatches, 'get').mockResolvedValue(linesInDb[0] as any)
+      vi.spyOn(db.importLines, 'toArray').mockResolvedValue(linesInDb)
+      // Each compositeKey count = 1 (exclusive)
+      vi.spyOn(db.importLines, 'where').mockReturnValue({
+        equals: vi.fn().mockReturnValue({
+          count: vi.fn().mockResolvedValue(1),
+        }),
+      } as unknown as any)
+      const mockTransaction = () =>
+        vi
+          .spyOn(db, 'transaction' as any)
+          .mockImplementation(async (...args: any[]) => {
+            const fn = args.pop()
+            await fn()
+          })
+      mockTransaction()
+
+      await removeImportBatch('batch_A' as UploadBatchId)
+
+      expect(deleteBatchSpy).toHaveBeenCalledWith('batch_A')
+      expect(deleteLineSpy).toHaveBeenCalledTimes(1)
+      expect(deleteLineSpy).toHaveBeenCalledWith(linesInDb[0].id)
+      expect(deleteLineSpy).not.toHaveBeenCalledWith(linesInDb[1].id)
+    })
+  })
+})
+
+// ============================================================================
+// Regression: Import → Delete → Reimport date range cycle
+// ============================================================================
+
+describe('Issue: Performance Tracker date range after import/delete', () => {
+  function makeLine(
+    compositeKey: string,
+    transactionId: string,
+    date: string,
+    isValid = true,
+    isDuplicate = false,
+  ): ProcessedLine {
+    return {
+      compositeKey,
+      transactionId,
+      lineId: undefined,
+      date,
+      time: undefined,
+      itemName: 'Coffee',
+      categoryResolved: 'Coffee',
+      quantity: 2,
+      unitPriceInr: 180,
+      lineTotalInr: 360,
+      productId: undefined,
+      productName: 'Coffee',
+      validationIssues: [],
+      isValid,
+      isDuplicate,
+    }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('getLatestTransactionDate returns latest valid line date', async () => {
+    vi.spyOn(db.importLines, 'toArray').mockResolvedValue([
+      makeLine('txn1|Coffee|2024-11-01', 'txn1', '2024-11-01', true, false),
+      makeLine('txn2|Tea|2024-11-15', 'txn2', '2024-11-15', true, false),
+      makeLine('txn3|Tea|2024-11-10', 'txn3', '2024-11-10', true, false),
+      makeLine('txn4|Invalid|2024-12-01', 'txn4', '2024-12-01', false, false), // invalid, should be ignored
+    ])
+
+    const latest = await getLatestTransactionDate()
+    expect(latest).toBe('2024-11-15')
+  })
+
+  it('getLatestTransactionDate returns null when no valid lines', async () => {
+    vi.spyOn(db.importLines, 'toArray').mockResolvedValue([])
+    const latest = await getLatestTransactionDate()
+    expect(latest).toBeNull()
+  })
+
+  it('default dates use transaction dates, not system clock', async () => {
+    // Fix system clock to a far-future date to prove we use transaction dates
+    vi.spyOn(global.Date, 'now').mockImplementation(() => new Date('2026-11-22T00:00:00Z').getTime())
+
+    vi.spyOn(db.importLines, 'toArray').mockResolvedValue([
+      makeLine('txn1|Coffee|2024-11-04', 'txn1', '2024-11-04', true, false),
+      makeLine('txn2|Tea|2024-11-04', 'txn2', '2024-11-04', true, false),
+    ])
+
+    const latest = await getLatestTransactionDate()
+    expect(latest).toBe('2024-11-04') // from data, NOT 2026-11-22
+
+    vi.spyOn(global.Date, 'now').mockRestore()
+  })
+
+  it('import → delete → reimport cycle updates dates correctly', async () => {
+    // Phase 1: Import Batch A with dates in Nov 2024
+    const batchALines = [
+      makeLine('txn-A-1|Coffee|2024-11-01', 'txn-A-1', '2024-11-01', true, false),
+      makeLine('txn-A-2|Tea|2024-11-02', 'txn-A-2', '2024-11-02', true, false),
+    ]
+    vi.spyOn(db.importLines, 'toArray').mockResolvedValue(batchALines)
+
+    let latest = await getLatestTransactionDate()
+    expect(latest).toBe('2024-11-02')
+
+    // Phase 2: Delete Batch A
+    vi.spyOn(db.importLines, 'toArray').mockResolvedValue([])
+    latest = await getLatestTransactionDate()
+    expect(latest).toBeNull()
+
+    // Phase 3: Reimport Batch A with same dates
+    vi.spyOn(db.importLines, 'toArray').mockResolvedValue(batchALines)
+    latest = await getLatestTransactionDate()
+    expect(latest).toBe('2024-11-02')
+
+    vi.restoreAllMocks()
+  })
+})
+
+

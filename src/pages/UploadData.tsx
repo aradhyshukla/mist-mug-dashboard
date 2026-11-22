@@ -14,6 +14,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { ImportPreviewStep } from '@/components/common/ImportPreview'
 import { parseCsvFile, parseXlsxFile } from '@/lib/import'
 import { saveImportResult, getAllImportBatches, removeImportBatch } from '@/db'
+import { emitDataChanged } from '@/lib/events'
 import { formatDate } from '@/lib/utils'
 import type { ProcessedLine, UploadBatchId } from '@/types'
 
@@ -177,6 +178,8 @@ export function UploadData() {
     try {
       await removeImportBatch(id as any)
       await loadBatches()
+      // Notify all pages that data has changed so analytics refresh
+      emitDataChanged()
     } catch (err) {
       alert(`Failed to remove batch: ${err instanceof Error ? err.message : String(err)}`)
     }

@@ -13,9 +13,10 @@ vi.mock('@/db', () => ({
     },
   },
   getAllImportLines: vi.fn(),
+  getAllProducts: vi.fn(),
 }))
 
-import { getAllImportLines } from '@/db'
+import { getAllImportLines, getAllProducts } from '@/db'
 import { ProcessedLine } from '@/types'
 import {
   computeGrowthMetrics,
@@ -113,6 +114,7 @@ const FIXTURE_LINES_PREVIOUS: ProcessedLine[] = [
 
 beforeEach(() => {
   vi.mocked(getAllImportLines).mockResolvedValue([])
+  vi.mocked(getAllProducts).mockResolvedValue([])
 })
 
 describe('getComparisonPeriods', () => {
