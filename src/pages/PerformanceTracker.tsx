@@ -23,7 +23,6 @@ import { ReportingPeriodNavigator } from '@/components/common/ReportingPeriodNav
 import {
   computeDashboardMetrics,
   computeTopProducts,
-  computeCategoryPerformance,
   computeHistoricalGrowth,
 } from '@/lib/analytics'
 import { getAllImportLines } from '@/db'
@@ -97,31 +96,6 @@ function buildProductChange(
     quantityPercentChange: quantityPctChange,
     currentOrderCount: current.orderCount,
     previousOrderCount: prevOrders,
-  }
-}
-
-function buildCategoryChange(
-  current: { category: string; revenueInr: number; quantitySold: number },
-  previous: { category: string; revenueInr: number; quantitySold: number } | null
-): Record<string, unknown> {
-  const prevRevenue = previous?.revenueInr ?? null
-  const prevQty = previous?.quantitySold ?? null
-
-  let revenueChange: number | null = null
-  let revenuePctChange: number | null = null
-  if (prevRevenue !== null && prevRevenue > 0) {
-    revenueChange = Math.round((current.revenueInr - prevRevenue) * 100) / 100
-    revenuePctChange = Math.round(((current.revenueInr - prevRevenue) / prevRevenue) * 100 * 10) / 10
-  }
-
-  return {
-    category: current.category,
-    currentRevenue: current.revenueInr,
-    previousRevenue: prevRevenue,
-    revenueChange,
-    revenuePercentChange: revenuePctChange,
-    currentQuantity: current.quantitySold,
-    previousQuantity: prevQty,
   }
 }
 
@@ -252,7 +226,6 @@ export function PerformanceTracker() {
   } | null>(null)
   const [coverageWarning, setCoverageWarning] = React.useState<string | null>(null)
   const [productChanges, setProductChanges] = React.useState<Array<any>>([])
-  const [categoryChanges, setCategoryChanges] = React.useState<Array<any>>([])
   const [historicalGrowth, setHistoricalGrowth] = React.useState<Array<any>>([])
   const [error, setError] = React.useState<string | null>(null)
 
@@ -287,7 +260,6 @@ export function PerformanceTracker() {
       setPeriodInfo(null)
       setGrowthMetrics([])
       setProductChanges([])
-      setCategoryChanges([])
       setHistoricalGrowth([])
       setError(null)
       return
@@ -365,7 +337,6 @@ export function PerformanceTracker() {
           buildMetric('Avg Order Value', current.averageOrderValue, null),
         ])
         setProductChanges([])
-        setCategoryChanges([])
       } else {
         setGrowthMetrics([
           buildMetric('Revenue', current.revenueInr, previousForMetrics?.revenueInr ?? null),
@@ -388,16 +359,6 @@ export function PerformanceTracker() {
         )
         setProductChanges(
           currentProducts.map((p) => buildProductChange(p, previousProductMap.get(`${p.productName}|${p.category}`) ?? null))
-        )
-
-        // Category-level changes: current vs same-hierarchy previous.
-        const currentCats = await computeCategoryPerformance(currentStart, currentEnd)
-        const previousCats = previousForMetrics
-          ? await computeCategoryPerformance(previousResolved!.startDate, previousResolved!.endDate)
-          : []
-        const previousCatMap = new Map(previousCats.map((c) => [c.category, c]))
-        setCategoryChanges(
-          currentCats.map((c) => buildCategoryChange(c, previousCatMap.get(c.category) ?? null))
         )
       }
 
@@ -553,7 +514,7 @@ export function PerformanceTracker() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Product Performance Changes */}
-        <section className="card-premium p-6 lg:col-span-2">
+        <section className="card-premium p-6 lg:col-span-3">
           <div className="flex items-center justify-between mb-6">
             <h3 className="font-serif text-lg text-ink">Product-Level Changes</h3>
           </div>
@@ -591,45 +552,6 @@ export function PerformanceTracker() {
                       <TableCell className="text-sm text-ink">{p.currentQuantity}</TableCell>
                       <TableCell className="text-sm text-ink">{p.previousQuantity === null ? '—' : p.previousQuantity}</TableCell>
                       <TableCell className="text-sm text-ink">{p.quantityChange === null ? 'N/A' : p.quantityChange}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </section>
-
-        {/* Category Performance Changes */}
-        <section className="card-premium p-6">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="font-serif text-lg text-ink">Category-Level Changes</h3>
-          </div>
-          {categoryChanges.length === 0 ? (
-            <EmptyState
-              title="No category data"
-              description="Select a reporting period to see category performance changes."
-              icon={<Table className="w-10 h-10 text-rain/30 mx-auto mb-3" />}
-            />
-          ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Category</TableHead>
-                    <TableHead>Curr. Revenue</TableHead>
-                    <TableHead>Prev. Revenue</TableHead>
-                    <TableHead>Revenue Δ</TableHead>
-                    <TableHead>Revenue %</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {categoryChanges.map((c: any, i: number) => (
-                    <TableRow key={i}>
-                      <TableCell className="text-sm font-medium text-ink">{c.category}</TableCell>
-                      <TableCell className="text-sm font-serif text-ink">₹{c.currentRevenue}</TableCell>
-                      <TableCell className="text-sm text-ink">{c.previousRevenue === null ? '—' : `₹${c.previousRevenue}`}</TableCell>
-                      <TableCell className="text-sm text-ink">{c.revenueChange === null ? 'N/A' : formatAbs(c.revenueChange)}</TableCell>
-                      <TableCell className="text-sm text-ink">{c.revenuePercentChange === null ? 'N/A' : formatPct(c.revenuePercentChange)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

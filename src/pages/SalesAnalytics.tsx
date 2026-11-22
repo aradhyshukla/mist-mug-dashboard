@@ -22,7 +22,6 @@ import {
   computeDailyTrend,
   computeMonthlyTrend,
   computeYearlyTrend,
-  computeCategoryRevenue,
 } from '@/lib/analytics'
 import { getAllImportLines } from '@/db'
 import { resolveSelection, type ResolvedPeriod } from '@/lib/reporting-periods'
@@ -35,7 +34,6 @@ import { Button } from '@/components/ui/button'
 import { WeekdayWeekendChart } from '@/components/analytics/WeekdayWeekendChart'
 import { TopSellingProducts } from '@/components/analytics/TopSellingProducts'
 import { RevenueTrends } from '@/components/analytics/RevenueTrends'
-import { CategoryRevenueDonut } from '@/components/analytics/CategoryRevenueDonut'
 import { BusiestHoursChart } from '@/components/analytics/BusiestHoursChart'
 import { Link } from 'react-router-dom'
 
@@ -60,7 +58,6 @@ export function SalesAnalytics() {
   const [hourlyData, setHourlyData] = React.useState<Array<any>>([])
   const [weekdayWeekend, setWeekdayWeekend] = React.useState<any>(null)
   const [trendData, setTrendData] = React.useState<Array<any>>([])
-  const [categoryData, setCategoryData] = React.useState<Array<any>>([])
   const [hasData, setHasData] = React.useState(false)
   const [granularity, setGranularity] = React.useState<'Daily' | 'Monthly' | 'Yearly'>('Daily')
   const [periodRangeLabel, setPeriodRangeLabel] = React.useState('')
@@ -137,14 +134,12 @@ export function SalesAnalytics() {
           itemsSold: d.itemsSold,
         }))
     }
-    const cd = await computeCategoryRevenue(start, end)
 
     setMetrics(m)
     setTopProducts(tp)
     setHourlyData(hd)
     setWeekdayWeekend(ww)
     setTrendData(td)
-    setCategoryData(cd)
     setGranularity(granularity)
     setPeriodRangeLabel(`${formatDate(start)} – ${formatDate(end)}`)
     setHasData(m.orderCount > 0 || m.itemsSold > 0)
@@ -296,7 +291,7 @@ export function SalesAnalytics() {
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Top-Selling Products */}
-            <TopSellingProducts products={topProducts} categoryRevenue={categoryData} />
+            <TopSellingProducts products={topProducts} />
 
             {/* Weekday vs Weekend */}
             <WeekdayWeekendChart data={weekdayWeekend} />
@@ -351,13 +346,6 @@ export function SalesAnalytics() {
             metrics={metrics ?? { revenueInr: 0, orderCount: 0, itemsSold: 0, averageOrderValue: 0 }}
             periodRangeLabel={periodRangeLabel}
             granularity={granularity}
-          />
-
-          {/* Category Performance */}
-          <CategoryRevenueDonut
-            data={categoryData}
-            title="Category Performance"
-            subtitle="Revenue distribution by product category"
           />
 
           {/* Busiest Hours */}
