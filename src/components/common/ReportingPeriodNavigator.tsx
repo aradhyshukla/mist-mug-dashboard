@@ -213,6 +213,7 @@ export function ReportingPeriodNavigator({
       <Button
         variant="outline"
         size="sm"
+        className="min-w-[160px]"
         onClick={() => {
           setOpen((prev) => {
             if (!prev) {

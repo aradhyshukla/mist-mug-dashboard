@@ -30,8 +30,11 @@ export interface WeekdayWeekendChartData {
   weekendRevenue: number
   weekdayOrderCount: number
   weekendOrderCount: number
+  weekdayCount: number
+  weekendCount: number
   averageWeekdayRevenue: number | null
   averageWeekendRevenue: number | null
+  percentageDifference: number | null
 }
 
 interface WeekdayWeekendChartProps {
@@ -74,26 +77,32 @@ export function WeekdayWeekendChart({ data }: WeekdayWeekendChartProps) {
 
   return (
     <section className="card-premium p-5">
-      <h3 className="font-serif text-lg text-ink mb-4">Weekday vs Weekend</h3>
-
-      {/* Interactive metric selector */}
-      <div className="flex flex-wrap gap-2 mb-6" role="group" aria-label="Comparison metric">
-        {METRICS.map((m) => (
-          <Button
-            key={m}
-            size="sm"
-            variant={metric === m ? 'brand' : 'outline'}
-            onClick={() => setMetric(m)}
-            aria-pressed={metric === m}
-            aria-label={`${METRIC_LABELS[m]} metric, ${metric === m ? 'selected' : 'not selected'}`}
-          >
-            {METRIC_LABELS[m]}
-          </Button>
-        ))}
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+        <div className="flex flex-col gap-1">
+          <h3 className="font-serif text-lg text-ink">Weekday vs Weekend</h3>
+          <p className="text-sm text-rain/60">
+            {hasValues ? 'Compare weekday and weekend performance' : 'Select a reporting period to view weekday vs weekend data.'}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Comparison metric">
+          {METRICS.map((m) => (
+            <Button
+              key={m}
+              size="sm"
+              variant={data && metric === m ? 'brand' : 'outline'}
+              disabled={!data}
+              onClick={() => setMetric(m)}
+              aria-pressed={metric === m}
+              aria-label={`${METRIC_LABELS[m]} metric, ${metric === m ? 'selected' : 'not selected'}`}
+            >
+              {METRIC_LABELS[m]}
+            </Button>
+          ))}
+        </div>
       </div>
 
       {/* Horizontal comparison chart */}
-      <div className="h-48">
+      <div className="h-48 mt-4">
         <ResponsiveContainer width="100%" height={160}>
           <BarChart
             layout="vertical"
@@ -170,6 +179,53 @@ export function WeekdayWeekendChart({ data }: WeekdayWeekendChartProps) {
 
       {!hasValues && data && (
         <p className="mt-4 text-sm text-rain/60">No recorded sales for the selected period.</p>
+      )}
+
+      {/* Four KPI cards */}
+      {data && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
+          <div className="p-4 bg-[#d8e8dc]/30 rounded-lg border border-[#1e5e3a]/30">
+            <p className="text-xs text-[#1e5e3a] uppercase tracking-wider">Weekday Revenue</p>
+            <p className="text-lg font-serif text-ink">
+              ₹{data.weekdayRevenue.toLocaleString('en-IN')}
+            </p>
+          </div>
+          <div className="p-4 bg-[#f3e8d3]/30 rounded-lg border border-[#a6533f]/30">
+            <p className="text-xs text-[#a6533f] uppercase tracking-wider">Weekend Revenue</p>
+            <p className="text-lg font-serif text-ink">
+              ₹{data.weekendRevenue.toLocaleString('en-IN')}
+            </p>
+          </div>
+          <div className="p-4 bg-[#d8e8dc]/30 rounded-lg border border-[#1e5e3a]/30">
+            <p className="text-xs text-[#1e5e3a] uppercase tracking-wider">Avg per Weekday</p>
+            <p className="text-lg font-serif text-ink">
+              {data.averageWeekdayRevenue !== null ? `₹${data.averageWeekdayRevenue}` : '—'}
+            </p>
+          </div>
+          <div className="p-4 bg-[#f3e8d3]/30 rounded-lg border border-[#a6533f]/30">
+            <p className="text-xs text-[#a6533f] uppercase tracking-wider">Avg per Weekend Day</p>
+            <p className="text-lg font-serif text-ink">
+              {data.averageWeekendRevenue !== null ? `₹${data.averageWeekendRevenue}` : '—'}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Summary panel */}
+      {data && (
+        <div className="p-3 rounded bg-paper/50 border border-line mt-6">
+          <p className="text-sm text-rain/60">
+            Weekdays: {data.weekdayCount} days observed, {data.weekdayOrderCount} orders
+          </p>
+          <p className="text-sm text-rain/60">
+            Weekends: {data.weekendCount} days observed, {data.weekendOrderCount} orders
+          </p>
+          {data.percentageDifference !== null && (
+            <p className="text-sm text-rain/60">
+              Difference: {data.percentageDifference > 0 ? '+' : ''}{data.percentageDifference}%
+            </p>
+          )}
+        </div>
       )}
     </section>
   )

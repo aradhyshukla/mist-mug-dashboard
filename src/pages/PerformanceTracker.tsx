@@ -5,20 +5,13 @@
  * hierarchical reporting period chosen through the shared
  * ReportingPeriodNavigator.
  *
- * Supports: All Time, entire year, entire month, calendar week.
- * Previous-period comparison:
- *   - Year  → preceding calendar year
- *   - Month → preceding calendar month
- *   - Week  → preceding comparable calendar-week segment
- *   - All Time → no previous period (lifetime metrics only)
- *
- * Selection and application are separate states. All available periods are
- * derived from actual imported transaction dates, never from the system clock.
+ * The complete dashboard layout always renders. Content within each section
+ * responds to the current data state: no period selected, no imported data,
+ * loading, ready, empty period, no previous data, or error.
  */
 
 import * as React from 'react'
 import { SectionHeader } from '@/components/common/EmptyState'
-import { EmptyState } from '@/components/common/EmptyState'
 import { ReportingPeriodNavigator } from '@/components/common/ReportingPeriodNavigator'
 import {
   computeDashboardMetrics,
@@ -37,23 +30,31 @@ import { onDataChanged } from '@/lib/events'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Link } from 'react-router-dom'
-import { formatInr, cn } from '@/lib/utils'
+import { cn } from '@/lib/utils'
 import type { ProcessedLine, ComparisonType, ProductPerformance } from '@/types'
 
 const PERFORMANCE_STORAGE_KEY = 'mistmug:performance:appliedPeriod'
 
-function formatPct(value: number | null): string {
-  if (value === null) return 'N/A'
+export function formatPct(value: number | null): string {
+  if (value === null || value === undefined) return '—'
   return `${value >= 0 ? '+' : ''}${value}%`
 }
 
-function formatAbs(value: number | null): string {
-  if (value === null) return 'N/A'
-  return `${value >= 0 ? '+' : ''}₹${Math.abs(value)}`
+export function formatAbs(value: number | null): string {
+  if (value === null) return '—'
+  return `${value >= 0 ? '+' : '-'}${Math.abs(value)}`
+}
+
+/** Format a metric value: ₹ for Revenue / Avg Order Value, plain integer for Orders / Units Sold. */
+export function formatMetricValue(label: string, value: number | null): string {
+  if (value === null) return '—'
+  const isCurrency = label === 'Revenue' || label === 'Avg Order Value'
+  if (isCurrency) return `₹${value.toLocaleString('en-IN')}`
+  return Math.round(value).toLocaleString('en-IN')
 }
 
 /** Inclusive calendar-day count between two YYYY-MM-DD dates. */
-function daysInRange(start: string, end: string): number {
+export function daysInRange(start: string, end: string): number {
   const [sy, sm, sd] = start.split('-').map(Number)
   const [ey, em, ed] = end.split('-').map(Number)
   const s = new Date(Date.UTC(sy, sm - 1, sd))
@@ -67,7 +68,6 @@ function buildProductChange(
 ): Record<string, unknown> {
   const prevRevenue = previous?.revenueInr ?? null
   const prevQty = previous?.quantitySold ?? null
-  const prevOrders = previous?.orderCount ?? null
 
   let revenueChange: number | null = null
   let revenuePctChange: number | null = null
@@ -95,11 +95,11 @@ function buildProductChange(
     quantityChange,
     quantityPercentChange: quantityPctChange,
     currentOrderCount: current.orderCount,
-    previousOrderCount: prevOrders,
+    previousOrderCount: previous?.orderCount ?? null,
   }
 }
 
-function selectionToComparisonType(
+export function selectionToComparisonType(
   kind: 'all-time' | 'year' | 'month' | 'week'
 ): ComparisonType | null {
   switch (kind) {
@@ -114,72 +114,27 @@ function selectionToComparisonType(
   }
 }
 
-function GrowthCard({
-  metric,
-}: {
-  metric: {
-    label: string
-    current: number
-    previous: number | null
-    absoluteDifference: number | null
-    percentageChange: number | null
-    isPositive: boolean | null
-  }
-}) {
-  const hasChange =
-    metric.absoluteDifference !== null && metric.percentageChange !== null
-
-  return (
-    <div className="card-premium p-5">
-      <p className="text-xs text-rain/50 uppercase tracking-wider font-medium mb-2">
-        {metric.label} Growth
-      </p>
-      <div className="space-y-3">
-        <div className="flex items-baseline gap-1">
-          <span className="text-xl font-serif text-ink">
-            {formatInr(metric.label === 'Orders' || metric.label === 'Units Sold'
-              ? metric.current
-              : metric.current)}
-          </span>
-        </div>
-        <div className="flex items-center gap-2 text-xs">
-          <span
-            className={cn(
-              'font-medium',
-              metric.isPositive === true
-                ? 'text-[#1e5e3a]'
-                : metric.isPositive === false
-                  ? 'text-[#8a2f1d]'
-                  : 'text-rain/50'
-            )}
-          >
-            {hasChange
-              ? `${formatPct(metric.percentageChange)} vs previous`
-              : 'N/A — no prior data'}
-          </span>
-        </div>
-        {hasChange && (
-          <div className="flex items-center gap-2 text-xs text-rain/60">
-            <span>Previous:
-              {metric.label === 'Avg Order Value'
-                ? `₹${Math.round(metric.previous!)}`
-                : metric.label === 'Orders' || metric.label === 'Units Sold'
-                  ? metric.previous!
-                  : `₹${metric.previous!}`}
-            </span>
-            <span>Abs diff: {formatAbs(metric.absoluteDifference)}</span>
-          </div>
-        )}
-      </div>
-    </div>
-  )
+type GrowthMetricState = {
+  label: string
+  current: number | null
+  previous: number | null
+  absoluteDifference: number | null
+  percentageChange: number | null
+  isPositive: boolean | null
 }
 
-function buildMetric(
+const EMPTY_METRICS: GrowthMetricState[] = [
+  { label: 'Revenue', current: null, previous: null, absoluteDifference: null, percentageChange: null, isPositive: null },
+  { label: 'Orders', current: null, previous: null, absoluteDifference: null, percentageChange: null, isPositive: null },
+  { label: 'Units Sold', current: null, previous: null, absoluteDifference: null, percentageChange: null, isPositive: null },
+  { label: 'Avg Order Value', current: null, previous: null, absoluteDifference: null, percentageChange: null, isPositive: null },
+]
+
+export function buildMetric(
   label: string,
   current: number,
   previous: number | null
-) {
+): GrowthMetricState {
   const absDiff = previous === null ? null : current - previous
   let pctChange: number | null = null
   let isPositive: boolean | null = null
@@ -197,25 +152,77 @@ function buildMetric(
   }
 }
 
+function GrowthCard({
+  metric,
+  computing,
+}: {
+  metric: GrowthMetricState
+  computing: boolean
+}) {
+  const hasChange =
+    metric.absoluteDifference !== null && metric.percentageChange !== null
+  const hasValue = metric.current !== null
+
+  return (
+    <div className="card-premium p-5">
+      <p className="text-xs text-rain/50 uppercase tracking-wider font-medium mb-2">
+        {metric.label} Growth
+      </p>
+      <div className="space-y-3">
+        <div className="flex items-baseline gap-1">
+          <span className="text-xl font-serif text-ink">
+            {hasValue ? formatMetricValue(metric.label, metric.current) : '—'}
+          </span>
+          {computing && <span className="text-rain/40 animate-pulse">…</span>}
+        </div>
+        <div className="flex items-center gap-2 text-xs">
+          <span
+            className={cn(
+              'font-medium',
+              metric.isPositive === true
+                ? 'text-[#1e5e3a]'
+                : metric.isPositive === false
+                  ? 'text-[#8a2f1d]'
+                  : 'text-rain/50'
+            )}
+          >
+            {hasChange
+              ? `${formatPct(metric.percentageChange)} vs previous`
+              : '—'}
+          </span>
+        </div>
+        {hasChange && (
+          <div className="flex items-center gap-2 text-xs text-rain/60">
+            <span>Previous:</span>
+            <span>
+              {metric.label === 'Avg Order Value'
+                ? `₹${Math.round(metric.previous!)}`
+                : metric.label === 'Orders' || metric.label === 'Units Sold'
+                  ? metric.previous!
+                  : `₹${metric.previous!}`}
+            </span>
+            <span>Abs diff:</span>
+            <span>{formatAbs(metric.absoluteDifference)}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export function PerformanceTracker() {
   const [lines, setLines] = React.useState<ProcessedLine[]>([])
-  const [loading, setLoading] = React.useState(true)
+  const [initialLoading, setInitialLoading] = React.useState(true)
 
   const { applied, setApplied, clearApplied } = useReportingPeriodState({
     storageKey: PERFORMANCE_STORAGE_KEY,
     lines,
   })
 
-  const [growthMetrics, setGrowthMetrics] = React.useState<
-    Array<{
-      label: string
-      current: number
-      previous: number | null
-      absoluteDifference: number | null
-      percentageChange: number | null
-      isPositive: boolean | null
-    }>
-  >([])
+  const [computing, setComputing] = React.useState(false)
+  const [growthMetrics, setGrowthMetrics] = React.useState<GrowthMetricState[]>(
+    EMPTY_METRICS
+  )
   const [periodInfo, setPeriodInfo] = React.useState<{
     currentStart: string
     currentEnd: string
@@ -231,6 +238,11 @@ export function PerformanceTracker() {
 
   const [range, setRange] = React.useState<ResolvedPeriod | null>(null)
 
+  const hasAnyData = lines.some((l) => l.isValid && !l.isDuplicate && l.date)
+  const isLoading = initialLoading || computing
+  const hasError = error != null
+  const noPeriod = !applied
+
   // Resolve applied selection to an inclusive date range.
   React.useEffect(() => {
     let resolved: ResolvedPeriod | null = null
@@ -241,12 +253,15 @@ export function PerformanceTracker() {
   }, [applied, lines])
 
   async function loadData() {
-    setLoading(true)
+    setInitialLoading(true)
+    setError(null)
     try {
       const all = await getAllImportLines()
       setLines(all)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load sales data')
     } finally {
-      setLoading(false)
+      setInitialLoading(false)
     }
   }
 
@@ -258,10 +273,11 @@ export function PerformanceTracker() {
   React.useEffect(() => {
     if (!range) {
       setPeriodInfo(null)
-      setGrowthMetrics([])
+      setGrowthMetrics(EMPTY_METRICS)
       setProductChanges([])
       setHistoricalGrowth([])
       setError(null)
+      setCoverageWarning(null)
       return
     }
     loadPerformance()
@@ -276,7 +292,7 @@ export function PerformanceTracker() {
   }, [])
 
   async function loadPerformance() {
-    setLoading(true)
+    setComputing(true)
     setError(null)
     setCoverageWarning(null)
     try {
@@ -285,12 +301,9 @@ export function PerformanceTracker() {
       const { startDate: currentStart, endDate: currentEnd } = range
       const isAllTime = applied?.kind === 'all-time'
 
-      // Previous period at the SAME hierarchy level (Year→Year−1, Month→Month−1
-      // same year, Week→Week−1 same month; January/Week 1/All Time → null).
       const previousSelection = applied ? getPreviousPeriod(applied) : null
       const previousResolved = previousSelection ? resolveSelection(previousSelection, lines) : null
 
-      // Determine whether the previous period actually contains imported records.
       let previousMetrics: {
         revenueInr: number
         orderCount: number
@@ -329,7 +342,6 @@ export function PerformanceTracker() {
       const previousForMetrics = hasPreviousData ? previousMetrics : null
 
       if (isAllTime) {
-        // All Time: lifetime metrics only, no previous period.
         setGrowthMetrics([
           buildMetric('Revenue', current.revenueInr, null),
           buildMetric('Orders', current.orderCount, null),
@@ -349,7 +361,6 @@ export function PerformanceTracker() {
           ),
         ])
 
-        // Product-level changes: current vs same-hierarchy previous, matched by product identity.
         const currentProducts = await computeTopProducts(currentStart, currentEnd, 100)
         const previousProducts = previousForMetrics
           ? await computeTopProducts(previousResolved!.startDate, previousResolved!.endDate, 100)
@@ -368,22 +379,14 @@ export function PerformanceTracker() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load performance data')
     } finally {
-      setLoading(false)
+      setComputing(false)
     }
   }
 
-  if (loading) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full">
-        <p className="text-rain/60 text-sm">Loading performance data…</p>
-      </div>
-    )
-  }
+  const ordersMetric = growthMetrics.find((m) => m.label === 'Orders')
+  const periodHasData = ordersMetric?.current != null && ordersMetric.current > 0
 
-  const hasAnyData = lines.some((l) => l.isValid && !l.isDuplicate && l.date)
-
-  // No sales data at all: empty state with path to Upload Data.
-  if (!hasAnyData) {
+  if (isLoading) {
     return (
       <div className="space-y-8">
         <SectionHeader
@@ -392,49 +395,78 @@ export function PerformanceTracker() {
           action={
             <ReportingPeriodNavigator
               lines={lines}
-              applied={null}
-              onApply={() => {}}
-              selectLabel="Select Period"
-            />
-          }
-        />
-        <EmptyState
-          title="No sales data"
-          description="Import sales data via Upload Data to view performance comparisons. Week, Month, Year and All Time filters will become available once data exists."
-          action={
-            <Button asChild variant="brand" size="sm">
-              <Link to="/upload">Upload Data</Link>
-            </Button>
-          }
-        />
-      </div>
-    )
-  }
-
-  // No period applied yet: prompt the user to select one.
-  if (!applied) {
-    return (
-      <div className="space-y-8">
-        <SectionHeader
-          title="Performance Tracker"
-          description="Compare performance across periods using mathematical calculations only."
-          action={
-            <ReportingPeriodNavigator
-              lines={lines}
-              applied={null}
+              applied={applied}
               onApply={setApplied}
               selectLabel="Select Period"
             />
           }
         />
-        <div className="flex flex-col items-center justify-center text-center py-20">
-          <p className="text-rain text-sm font-medium">Select the time period you want to analyze.</p>
+        <div className="card-premium p-4">
+          <p className="text-rain/60 text-sm">Loading sales data…</p>
         </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+          {EMPTY_METRICS.map((m) => (
+            <GrowthCard key={m.label} metric={m} computing />
+          ))}
+        </div>
+        <section className="card-premium p-5 lg:col-span-3">
+          <div className="flex items-center justify-between mb-6">
+            <h3 className="font-serif text-lg text-ink">Product-Level Changes</h3>
+          </div>
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Product</TableHead>
+                  <TableHead>Category</TableHead>
+                  <TableHead>Current Revenue</TableHead>
+                  <TableHead>Previous Revenue</TableHead>
+                  <TableHead>Revenue Δ</TableHead>
+                  <TableHead>Revenue %</TableHead>
+                  <TableHead>Current Qty</TableHead>
+                  <TableHead>Previous Qty</TableHead>
+                  <TableHead>Qty Δ</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                <TableRow>
+                  <TableCell className="text-center py-8 text-rain/60 text-sm">
+                    Loading product performance…
+                  </TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </div>
+        </section>
+        <section className="card-premium p-5">
+          <div className="flex items-center justify-between mb-6">
+            <h3 className="font-serif text-lg text-ink">Historical Growth</h3>
+          </div>
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Period</TableHead>
+                  <TableHead>Revenue</TableHead>
+                  <TableHead>Orders</TableHead>
+                  <TableHead>Units Sold</TableHead>
+                  <TableHead>Avg Order Value</TableHead>
+                  <TableHead>Revenue Change</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                <TableRow>
+                  <TableCell className="text-center py-8 text-rain/60 text-sm">
+                    Loading historical growth…
+                  </TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </div>
+        </section>
       </div>
     )
   }
-
-  const resolved = range
 
   return (
     <div className="space-y-8">
@@ -451,15 +483,40 @@ export function PerformanceTracker() {
         }
       />
 
+      {/* Reporting-period status area */}
+      {hasError && (
+        <div className="p-3 rounded bg-[#f5dede]/30 border border-[#8a2f1d]/30 text-sm text-[#8a2f1d] flex items-center gap-2">
+          {error}
+          <Button variant="outline" size="sm" onClick={loadData}>
+            Retry
+          </Button>
+        </div>
+      )}
+
+      {!hasAnyData && !hasError && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#f3e8d3]/30 border border-[#a6533f]/30 text-[#a6533f] text-sm font-medium">
+          No sales data imported yet.
+          <Button variant="outline" size="sm" asChild>
+            <Link to="/upload">Upload Data</Link>
+          </Button>
+        </div>
+      )}
+
+      {noPeriod && hasAnyData && !hasError && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#f3e8d3]/30 border border-[#a6533f]/30 text-[#a6533f] text-sm font-medium">
+          Select a reporting period to begin analysis.
+        </div>
+      )}
+
       {/* Applied period banner */}
-      {resolved && (
+      {range && !hasError && (
         <div className="flex items-center justify-between px-0">
           <div className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-[#d8e8dc]/60 border border-[#1e5e3a]/30 text-[#1e5e3a] text-sm font-medium">
             <span>Analyzing:</span>
-            <span className="font-serif text-ink">{resolved.label}</span>
-            {resolved.startDate && resolved.endDate && (
+            <span className="font-serif text-ink">{range.label}</span>
+            {range.startDate && range.endDate && (
               <span className="text-rain/60 text-xs">
-                {resolved.startDate} → {resolved.endDate}
+                {range.startDate} → {range.endDate}
               </span>
             )}
           </div>
@@ -476,72 +533,73 @@ export function PerformanceTracker() {
         </div>
       )}
 
-      {error && (
-        <div className="p-3 rounded bg-[#f5dede]/30 border border-[#8a2f1d]/30 text-sm text-[#8a2f1d]">
-          {error}
+      {range && hasAnyData && !periodHasData && !hasError && (
+        <div className="p-3 rounded bg-[#f3e8d3]/30 border border-[#a6533f]/30 text-sm text-[#a6533f]">
+          No transactions found for the selected period.
         </div>
       )}
 
-      {/* Period info */}
-      {periodInfo && (
-        <div className="card-premium p-4">
-          <div className="flex flex-col gap-2 text-sm text-rain/60">
-            <div className="flex items-center gap-4">
-              <span>Current: {periodInfo.currentStart} → {periodInfo.currentEnd}</span>
-              {periodInfo.previousStart && periodInfo.previousEnd && (
-                <span className="border-l border-line pl-4">
-                  Previous ({periodInfo.previousLabel}): {periodInfo.previousStart} → {periodInfo.previousEnd}
-                </span>
-              )}
-              {!periodInfo.isAllTime && !periodInfo.previousStart && (
-                <span>No previous period data</span>
-              )}
-              {periodInfo.isAllTime && <span>Lifetime — no previous period</span>}
-            </div>
+      {/* Comparison panel — always visible */}
+      <div className="card-premium p-4">
+        <div className="flex flex-col gap-2 text-sm text-rain/60">
+          <div className="flex items-center gap-4">
+            {periodInfo ? (
+              <>
+                <span>Current: {periodInfo.currentStart} → {periodInfo.currentEnd}</span>
+                {periodInfo.previousStart && periodInfo.previousEnd && (
+                  <span className="border-l border-line pl-4">
+                    Previous ({periodInfo.previousLabel}): {periodInfo.previousStart} → {periodInfo.previousEnd}
+                  </span>
+                )}
+                {!periodInfo.isAllTime && !periodInfo.previousStart && (
+                  <span>No previous period data</span>
+                )}
+                {periodInfo.isAllTime && <span>Lifetime — no previous period</span>}
+              </>
+            ) : (
+              <span className="text-rain/40">Current Period: —</span>
+            )}
           </div>
+          {periodInfo ? null : (
+            <p className="text-xs text-rain/40">Comparison details will appear after selecting a period.</p>
+          )}
           {coverageWarning && (
             <p className="mt-2 text-xs text-[#8a2f1d]">⚠ {coverageWarning}</p>
           )}
         </div>
-      )}
+      </div>
 
-      {/* Growth KPI Cards */}
+      {/* Growth KPI Cards — always visible */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
         {growthMetrics.map((m) => (
-          <GrowthCard key={m.label} metric={m} />
+          <GrowthCard key={m.label} metric={m} computing={computing} />
         ))}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        {/* Product Performance Changes */}
-        <section className="card-premium p-5 lg:col-span-3">
+        {/* Product-Level Changes — always visible */}
+        <section className="card-premium p-5 lg:col-span-3">
           <div className="flex items-center justify-between mb-6">
             <h3 className="font-serif text-lg text-ink">Product-Level Changes</h3>
           </div>
-          {productChanges.length === 0 ? (
-            <EmptyState
-              title="No product data"
-              description="Select a reporting period to see product performance changes."
-              icon={<Table className="w-10 h-10 text-rain/30 mx-auto mb-3" />}
-            />
-          ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Product</TableHead>
-                    <TableHead>Category</TableHead>
-                    <TableHead>Curr. Revenue</TableHead>
-                    <TableHead>Prev. Revenue</TableHead>
-                    <TableHead>Revenue Δ</TableHead>
-                    <TableHead>Revenue %</TableHead>
-                    <TableHead>Curr. Qty</TableHead>
-                    <TableHead>Prev. Qty</TableHead>
-                    <TableHead>Qty Δ</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {productChanges.map((p: any, i: number) => (
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Product</TableHead>
+                  <TableHead>Category</TableHead>
+                  <TableHead>Current Revenue</TableHead>
+                  <TableHead>Previous Revenue</TableHead>
+                  <TableHead>Revenue Δ</TableHead>
+                  <TableHead>Revenue %</TableHead>
+                  <TableHead>Current Qty</TableHead>
+                  <TableHead>Previous Qty</TableHead>
+                  <TableHead>Qty Δ</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {productChanges.length > 0 ? (
+                  productChanges.map((p: any, i: number) => (
                     <TableRow key={i}>
                       <TableCell className="text-sm font-medium text-ink">{p.productName}</TableCell>
                       <TableCell className="text-sm text-rain/60">{p.category}</TableCell>
@@ -553,26 +611,24 @@ export function PerformanceTracker() {
                       <TableCell className="text-sm text-ink">{p.previousQuantity === null ? '—' : p.previousQuantity}</TableCell>
                       <TableCell className="text-sm text-ink">{p.quantityChange === null ? 'N/A' : p.quantityChange}</TableCell>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
+                  ))
+                ) : (
+                  <TableRow>
+                    <TableCell className="text-center py-8 text-rain/60 text-sm">
+                      Select a reporting period to view product performance.
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
         </section>
-      </div>
 
-      {/* Historical Growth Table */}
-      <section className="card-premium p-5">
-        <div className="flex items-center justify-between mb-6">
-          <h3 className="font-serif text-lg text-ink">Historical Growth</h3>
-        </div>
-        {historicalGrowth.length === 0 ? (
-          <EmptyState
-            title="No historical data"
-            description="Import sales data to view historical growth trends."
-            icon={<Table className="w-10 h-10 text-rain/30 mx-auto mb-3" />}
-          />
-        ) : (
+        {/* Historical Growth Table — always visible */}
+        <section className="card-premium p-5 lg:col-span-3">
+          <div className="flex items-center justify-between mb-6">
+            <h3 className="font-serif text-lg text-ink">Historical Growth</h3>
+          </div>
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
@@ -586,23 +642,31 @@ export function PerformanceTracker() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {historicalGrowth.map((row: any, i: number) => (
-                  <TableRow key={i}>
-                    <TableCell className="text-sm font-medium text-ink">{row.periodLabel}</TableCell>
-                    <TableCell className="text-sm font-serif text-ink">₹{row.revenueInr}</TableCell>
-                    <TableCell className="text-sm text-ink">{row.orderCount}</TableCell>
-                    <TableCell className="text-sm text-ink">{row.itemsSold}</TableCell>
-                    <TableCell className="text-sm text-ink">₹{Math.round(row.averageOrderValue)}</TableCell>
-                    <TableCell className="text-sm text-ink">
-                      {row.revenueChangePercent === null ? 'N/A' : formatPct(row.revenueChangePercent)}
+                {historicalGrowth.length > 0 ? (
+                  historicalGrowth.map((row: any, i: number) => (
+                    <TableRow key={i}>
+                      <TableCell className="text-sm font-medium text-ink">{row.periodLabel}</TableCell>
+                      <TableCell className="text-sm font-serif text-ink">₹{row.revenueInr}</TableCell>
+                      <TableCell className="text-sm text-ink">{row.orderCount}</TableCell>
+                      <TableCell className="text-sm text-ink">{row.itemsSold}</TableCell>
+                      <TableCell className="text-sm text-ink">₹{Math.round(row.averageOrderValue)}</TableCell>
+                      <TableCell className="text-sm text-ink">
+                        {row.revenueChangePercent === null ? 'N/A' : formatPct(row.revenueChangePercent)}
+                      </TableCell>
+                    </TableRow>
+                  ))
+                ) : (
+                  <TableRow>
+                    <TableCell className="text-center py-8 text-rain/60 text-sm">
+                      Select a reporting period to view historical growth.
                     </TableCell>
                   </TableRow>
-                ))}
+                )}
               </TableBody>
             </Table>
           </div>
-        )}
-      </section>
+        </section>
+      </div>
     </div>
   )
 }
