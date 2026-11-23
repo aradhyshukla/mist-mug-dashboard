@@ -130,13 +130,13 @@ function GrowthCard({
     metric.absoluteDifference !== null && metric.percentageChange !== null
 
   return (
-    <div className="card-premium p-6">
+    <div className="card-premium p-5">
       <p className="text-xs text-rain/50 uppercase tracking-wider font-medium mb-2">
         {metric.label} Growth
       </p>
       <div className="space-y-3">
         <div className="flex items-baseline gap-1">
-          <span className="text-2xl font-serif text-ink">
+          <span className="text-xl font-serif text-ink">
             {formatInr(metric.label === 'Orders' || metric.label === 'Units Sold'
               ? metric.current
               : metric.current)}
@@ -506,15 +506,15 @@ export function PerformanceTracker() {
       )}
 
       {/* Growth KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
         {growthMetrics.map((m) => (
           <GrowthCard key={m.label} metric={m} />
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         {/* Product Performance Changes */}
-        <section className="card-premium p-6 lg:col-span-3">
+        <section className="card-premium p-5 lg:col-span-3">
           <div className="flex items-center justify-between mb-6">
             <h3 className="font-serif text-lg text-ink">Product-Level Changes</h3>
           </div>
@@ -562,7 +562,7 @@ export function PerformanceTracker() {
       </div>
 
       {/* Historical Growth Table */}
-      <section className="card-premium p-6">
+      <section className="card-premium p-5">
         <div className="flex items-center justify-between mb-6">
           <h3 className="font-serif text-lg text-ink">Historical Growth</h3>
         </div>

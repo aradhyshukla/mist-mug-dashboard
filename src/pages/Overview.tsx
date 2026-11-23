@@ -149,7 +149,7 @@ export function Overview() {
   return (
     <div className="space-y-8">
       <section className="card-premium p-8 md:p-10">
-        <div className="flex flex-col md:flex-row md:items-center gap-6 mb-8">
+        <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-6 mb-8">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded bg-gold flex items-center justify-center">
               <svg className="w-6 h-6 text-coffee" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
@@ -163,8 +163,8 @@ export function Overview() {
               <p className="text-sm text-rain/60 uppercase tracking-wider font-medium">Café Sales Dashboard</p>
             </div>
           </div>
-          <div className="flex-1 text-right">
-            <p className="text-sm text-ink mb-1">Mussoorie, Uttarakhand · 2,005 m above sea level</p>
+          <div className="flex flex-col items-end gap-1">
+            <p className="text-sm text-ink font-medium">Mussoorie, Uttarakhand · 2,005 m above sea level</p>
             <p className="text-xs text-rain/50">Owner dashboard · Product management · Sales analytics</p>
           </div>
         </div>
@@ -175,25 +175,23 @@ export function Overview() {
         </p>
       </section>
 
-      <div className="flex flex-col md:flex-row gap-4 items-end">
-        <div className="flex-1">
-          <SectionHeader
-            title="Product Catalogue"
-            description={`Manage ${products.length} product${products.length !== 1 ? 's' : ''}. Prices shown are current catalogue prices in INR (₹).`}
-          />
-        </div>
-        <div className="flex gap-3 flex-shrink-0">
-          <Button variant="brand" size="sm" onClick={() => {
-            setEditingProduct(null)
-            setDialogOpen(true)
-          }}>
-            <Plus className="w-4 h-4 mr-2" /> Add Product
-          </Button>
-          <Button variant="brand-gold" size="sm" onClick={() => navigate('/upload')} className="px-6">
-            Upload Weekly Sales →
-          </Button>
-        </div>
-      </div>
+      <SectionHeader
+        title="Product Catalogue"
+        description={`Manage ${products.length} product${products.length !== 1 ? 's' : ''}. Prices shown are current catalogue prices in INR (₹).`}
+        action={
+          <div className="flex gap-3 flex-shrink-0">
+            <Button variant="brand" size="sm" onClick={() => {
+              setEditingProduct(null)
+              setDialogOpen(true)
+            }}>
+              <Plus className="w-4 h-4 mr-2" /> Add Product
+            </Button>
+            <Button variant="brand-gold" size="sm" onClick={() => navigate('/upload')} className="px-6">
+              Upload Weekly Sales →
+            </Button>
+          </div>
+        }
+      />
 
       <div className="bg-paper rounded-xl border border-line p-6">
         <div className="flex flex-col md:flex-row md:items-center gap-4 mb-6">
@@ -226,7 +224,7 @@ export function Overview() {
             <p className="text-rain/60 text-sm">No products match your filters.</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
             {filteredProducts.map((product) => (
               <ProductCard
                 key={product.id}

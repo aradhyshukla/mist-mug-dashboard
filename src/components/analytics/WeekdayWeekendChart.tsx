@@ -73,7 +73,7 @@ export function WeekdayWeekendChart({ data }: WeekdayWeekendChartProps) {
   const hasValues = items.some((item) => item.value > 0)
 
   return (
-    <section className="card-premium p-6">
+    <section className="card-premium p-5">
       <h3 className="font-serif text-lg text-ink mb-4">Weekday vs Weekend</h3>
 
       {/* Interactive metric selector */}

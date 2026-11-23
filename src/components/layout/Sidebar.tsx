@@ -111,14 +111,19 @@ export interface SidebarProps {
   activePath: string
   onItemClick: (href: string) => void
   onClose: () => void
+  collapsed: boolean
+  className?: string
 }
 
-export function Sidebar({ activePath, onItemClick, onClose }: SidebarProps) {
+export function Sidebar({ activePath, onItemClick, onClose, collapsed, className }: SidebarProps) {
   return (
     <aside
       className={cn(
-        'fixed inset-y-0 left-0 z-40 w-64 bg-forest text-cream border-r border-[rgba(243,232,211,0.22)] flex flex-col transition-all duration-300 ease-in-out',
+        'inset-y-0 left-0 z-40 bg-forest text-cream border-r border-[rgba(243,232,211,0.22)] flex flex-col transition-all duration-300 ease-in-out',
+        collapsed ? 'w-20' : 'w-64',
+        className,
       )}
+      aria-label="Navigation"
     >
       <div className="flex items-center justify-between px-3 py-5">
         <div className="flex items-center gap-2">
@@ -129,19 +134,23 @@ export function Sidebar({ activePath, onItemClick, onClose }: SidebarProps) {
               <path d="M3 3l9 9M7 7l9 9" />
             </svg>
           </div>
-          <div className="font-serif text-xl font-semibold text-cream tracking-tight leading-none">
-            MIST &amp; MUG
-          </div>
+          {!collapsed && (
+            <div className="font-serif text-xl font-semibold text-cream tracking-tight leading-none">
+              MIST &amp; MUG
+            </div>
+          )}
         </div>
-        <button
-          onClick={onClose}
-          aria-label="Close sidebar"
-          className="p-2 rounded-md text-rain/50 hover:text-cream hover:bg-[rgba(243,232,211,0.1)] transition-colors"
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-            <path d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
+        {!collapsed && (
+          <button
+            onClick={onClose}
+            aria-label="Close sidebar"
+            className="p-2 rounded-md text-rain/50 hover:text-cream hover:bg-[rgba(243,232,211,0.1)] transition-colors"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <path d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        )}
       </div>
 
       <nav className="flex-1 px-2 py-3 space-y-1">
@@ -154,6 +163,7 @@ export function Sidebar({ activePath, onItemClick, onClose }: SidebarProps) {
                 onItemClick(item.href)
               }}
               aria-label={item.label}
+              aria-current={isActive ? 'page' : undefined}
               className={cn(
                 'flex items-center gap-3 w-full px-3 py-3 rounded-lg text-sm font-medium transition-all',
                 isActive
@@ -162,7 +172,7 @@ export function Sidebar({ activePath, onItemClick, onClose }: SidebarProps) {
               )}
             >
               <item.icon className={cn(isActive ? 'text-gold' : 'text-rain/50')} />
-              {item.label}
+              {!collapsed && item.label}
             </button>
           )
         })}

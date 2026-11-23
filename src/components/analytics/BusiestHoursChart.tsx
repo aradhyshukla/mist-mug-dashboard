@@ -52,7 +52,7 @@ export function BusiestHoursChart({ data }: BusiestHoursChartProps) {
   const maxOrders = Math.max(...sorted.map((d) => d.orderCount), 0)
 
   return (
-    <section className="card-premium p-6">
+    <section className="card-premium p-5">
       <div className="flex flex-col gap-2">
         <h3 className="font-serif text-lg text-ink">Busiest Hours</h3>
         <p className="text-sm text-rain/60">Hourly sales performance</p>

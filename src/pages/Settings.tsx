@@ -115,6 +115,16 @@ export function Settings() {
     setProductError(null)
   }
 
+  // Close the product dialog on Escape.
+  React.useEffect(() => {
+    if (!productDialogOpen) return
+    const handleKeydown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeProductDialog()
+    }
+    document.addEventListener('keydown', handleKeydown)
+    return () => document.removeEventListener('keydown', handleKeydown)
+  }, [productDialogOpen])
+
   async function handleProductSave(data: {
     name: string
     category: string

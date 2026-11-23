@@ -9,7 +9,7 @@ type ProductCardProps = {
 
 export function ProductCard({ product, onEdit, onDeactivate, onActivate }: ProductCardProps) {
   return (
-    <div className="card-premium p-4 flex flex-col gap-4">
+    <div className="card-premium p-5 flex flex-col gap-4 h-full">
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
@@ -17,11 +17,11 @@ export function ProductCard({ product, onEdit, onDeactivate, onActivate }: Produ
               {product.isActive ? 'Available' : 'Deactivated'}
             </span>
           </div>
-          <h3 className="font-serif text-lg text-ink">{product.name}</h3>
+          <h3 className="font-serif text-lg text-ink leading-tight">{product.name}</h3>
           <p className="text-sm text-rain/60">{product.category}</p>
         </div>
         <div className="text-right">
-          <span className="text-xl font-serif text-ink">₹{product.currentPriceInr}</span>
+          <span className="text-2xl font-serif text-ink">₹{product.currentPriceInr}</span>
         </div>
       </div>
 
@@ -29,10 +29,10 @@ export function ProductCard({ product, onEdit, onDeactivate, onActivate }: Produ
         <img
           src={product.imageUrl}
           alt={product.name}
-          className="h-24 w-full object-cover rounded-lg border border-line"
+          className="h-32 w-full object-cover rounded-lg border border-line"
         />
       ) : (
-        <div className="h-24 w-full flex items-center justify-center rounded-lg border border-line border-dashed bg-paper/50 text-rain/40">
+        <div className="h-32 w-full flex items-center justify-center rounded-lg border border-line border-dashed bg-paper/50 text-rain/40">
           <svg className="w-8 h-8 mx-auto mb-1" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
             <path d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
           </svg>

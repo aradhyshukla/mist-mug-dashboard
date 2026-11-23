@@ -36,7 +36,7 @@ export function TopSellingProducts({ products }: TopSellingProductsProps) {
   const hasMore = products.length > TOP_N
 
   return (
-    <section className="card-premium p-6">
+    <section className="card-premium p-5">
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <h3 className="font-serif text-lg text-ink">Top-Selling Products</h3>
       </div>

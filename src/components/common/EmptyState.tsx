@@ -60,7 +60,9 @@ export function SectionHeader({ title, description, action }: SectionHeaderProps
         {description && <p className="section-subtitle">{description}</p>}
       </div>
       {action && (
-        <div className="ml-auto flex items-center gap-3">{action}</div>
+        <div className="ml-auto flex flex-col sm:flex-row items-end sm:items-center gap-3 sm:gap-2">
+          {action}
+        </div>
       )}
     </div>
   )

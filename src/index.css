@@ -56,6 +56,7 @@
   body {
     @apply bg-paper text-ink;
     font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
   }
   h1, h2, h3, h4, .font-serif {
     font-family: var(--font-serif);
@@ -66,29 +67,31 @@
 }
 
 @layer components {
+  /* Buttons — consistent height, caramel/forest accents, restrained hover */
   .btn-brand {
-    @apply inline-flex items-center justify-center gap-2 px-6 py-3 bg-forest text-cream font-medium text-sm rounded-md border border-forest transition-all hover:bg-[#0e2018] hover:-translate-y-[1px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2 active:translate-y-0;
+    @apply inline-flex items-center justify-center gap-2 px-6 py-3 bg-forest text-cream font-medium text-sm rounded-md border border-forest transition-colors hover:bg-[#0e2018] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2 active:translate-y-[1px];
   }
   .btn-brand-ghost {
-    @apply inline-flex items-center justify-center gap-2 px-6 py-3 bg-transparent text-forest font-medium text-sm rounded-md border border-forest transition-all hover:bg-forest hover:text-cream focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2;
+    @apply inline-flex items-center justify-center gap-2 px-6 py-3 bg-transparent text-forest font-medium text-sm rounded-md border border-forest transition-colors hover:bg-forest hover:text-cream focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2;
   }
   .btn-brand-gold {
-    @apply inline-flex items-center justify-center gap-2 px-6 py-3 bg-gold text-coffee font-semibold text-sm rounded-md border border-gold transition-all hover:bg-[#e2a24a] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2;
+    @apply inline-flex items-center justify-center gap-2 px-6 py-3 bg-gold text-coffee font-semibold text-sm rounded-md border border-gold transition-colors hover:bg-[#e2a24a] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2 active:translate-y-[1px];
   }
   .btn-brand-sm {
     @apply px-3 py-1.5 text-xs;
   }
   .chip {
-    @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-forest text-forest text-xs font-medium transition-all hover:bg-forest hover:text-cream;
+    @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-forest text-forest text-xs font-medium transition-colors hover:bg-forest hover:text-cream;
   }
   .chip.active {
     @apply bg-forest text-cream border-forest;
   }
+  /* Cards — consistent border, subtle shadow, warm paper fill */
   .card-premium {
-    @apply bg-paper border border-line rounded-xl shadow-sm overflow-hidden transition-all hover:shadow-md;
+    @apply bg-paper border border-line rounded-xl shadow-sm overflow-hidden transition-colors hover:shadow-md;
   }
   .input-brand {
-    @apply block w-full px-4 py-2.5 bg-cream border border-line rounded-md text-ink placeholder-rain/60 focus:outline-none focus:ring-2 focus:ring-gold focus:border-transparent transition-all;
+    @apply block w-full px-4 py-2.5 bg-cream border border-line rounded-md text-ink placeholder-rain/60 focus:outline-none focus:ring-2 focus:ring-gold focus:border-transparent transition-colors;
   }
   .label-brand {
     @apply text-sm font-medium text-ink mb-1.5 block;

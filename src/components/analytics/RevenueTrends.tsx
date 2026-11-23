@@ -153,7 +153,7 @@ export function RevenueTrends({ trendData, metrics, periodRangeLabel, granularit
   }
 
   return (
-    <section className="card-premium p-6">
+    <section className="card-premium p-5">
       {/* Header */}
       <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
         <div className="flex flex-col gap-1">
@@ -176,15 +176,15 @@ export function RevenueTrends({ trendData, metrics, periodRangeLabel, granularit
       <div className="mt-6 grid grid-cols-2 md:grid-cols-3 gap-4">
         <div className="p-4 rounded-lg border border-line bg-paper/50">
           <p className="text-xs text-rain/50 uppercase tracking-wider font-medium">Total Revenue</p>
-          <p className="mt-1 text-2xl font-serif text-ink">{formatInr(metrics.revenueInr)}</p>
+          <p className="mt-1 text-xl font-serif text-ink">{formatInr(metrics.revenueInr)}</p>
         </div>
         <div className="p-4 rounded-lg border border-line bg-paper/50">
           <p className="text-xs text-rain/50 uppercase tracking-wider font-medium">Unique Orders</p>
-          <p className="mt-1 text-2xl font-serif text-ink">{metrics.orderCount}</p>
+          <p className="mt-1 text-xl font-serif text-ink">{metrics.orderCount}</p>
         </div>
         <div className="p-4 rounded-lg border border-line bg-paper/50">
           <p className="text-xs text-rain/50 uppercase tracking-wider font-medium">Items Sold</p>
-          <p className="mt-1 text-2xl font-serif text-ink">{metrics.itemsSold}</p>
+          <p className="mt-1 text-xl font-serif text-ink">{metrics.itemsSold}</p>
         </div>
       </div>
 

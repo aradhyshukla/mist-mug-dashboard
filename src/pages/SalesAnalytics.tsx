@@ -262,29 +262,29 @@ export function SalesAnalytics() {
       ) : (
         <>
           {/* KPI Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            <div className="card-premium p-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+            <div className="card-premium p-5">
               <p className="text-xs text-rain/50 uppercase tracking-wider font-medium">Total Revenue</p>
               <div className="mt-2 flex items-baseline gap-1">
-                <span className="text-3xl font-serif text-ink">₹{metrics?.revenueInr ?? 0}</span>
+                <span className="text-2xl font-serif text-ink">₹{metrics?.revenueInr ?? 0}</span>
               </div>
             </div>
-            <div className="card-premium p-6">
+            <div className="card-premium p-5">
               <p className="text-xs text-rain/50 uppercase tracking-wider font-medium">Unique Orders</p>
               <div className="mt-2 flex items-baseline gap-1">
-                <span className="text-3xl font-serif text-ink">{metrics?.orderCount ?? 0}</span>
+                <span className="text-2xl font-serif text-ink">{metrics?.orderCount ?? 0}</span>
               </div>
             </div>
-            <div className="card-premium p-6">
+            <div className="card-premium p-5">
               <p className="text-xs text-rain/50 uppercase tracking-wider font-medium">Items Sold</p>
               <div className="mt-2 flex items-baseline gap-1">
-                <span className="text-3xl font-serif text-ink">{metrics?.itemsSold ?? 0}</span>
+                <span className="text-2xl font-serif text-ink">{metrics?.itemsSold ?? 0}</span>
               </div>
             </div>
-            <div className="card-premium p-6">
+            <div className="card-premium p-5">
               <p className="text-xs text-rain/50 uppercase tracking-wider font-medium">Avg Order Value</p>
               <div className="mt-2 flex items-baseline gap-1">
-                <span className="text-3xl font-serif text-ink">₹{Math.round(metrics?.averageOrderValue ?? 0)}</span>
+                <span className="text-2xl font-serif text-ink">₹{Math.round(metrics?.averageOrderValue ?? 0)}</span>
               </div>
             </div>
           </div>
