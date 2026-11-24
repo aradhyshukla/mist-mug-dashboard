@@ -27,8 +27,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import type { DashboardMetrics } from '@/types'
 import type { TrendBucket } from '@/lib/analytics'
 
-const CARAMEL = '#F0B35A'
-const FOREST = '#142E25'
+const CARAMEL = '#E8A54B'
+const FOREST = '#14302A'
 
 interface RevenueTrendsProps {
   trendData: TrendBucket[]

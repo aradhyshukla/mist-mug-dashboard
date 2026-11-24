@@ -55,12 +55,12 @@ export interface SectionHeaderProps {
 export function SectionHeader({ title, description, action }: SectionHeaderProps) {
   return (
     <div className="section-header">
-      <div className="flex flex-col">
+      <div className="flex flex-col gap-2">
         <h2 className="section-title">{title}</h2>
         {description && <p className="section-subtitle">{description}</p>}
       </div>
       {action && (
-        <div className="ml-auto flex flex-col sm:flex-row items-end sm:items-center gap-3 sm:gap-2">
+        <div className="ml-auto flex flex-col sm:flex-row items-center gap-3 sm:gap-2">
           {action}
         </div>
       )}

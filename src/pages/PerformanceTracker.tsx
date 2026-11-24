@@ -11,7 +11,6 @@
  */
 
 import * as React from 'react'
-import { SectionHeader } from '@/components/common/EmptyState'
 import { ReportingPeriodNavigator } from '@/components/common/ReportingPeriodNavigator'
 import {
   computeDashboardMetrics,
@@ -232,6 +231,7 @@ export function PerformanceTracker() {
     isAllTime: boolean
   } | null>(null)
   const [coverageWarning, setCoverageWarning] = React.useState<string | null>(null)
+  const [periodOpen, setPeriodOpen] = React.useState(false)
   const [productChanges, setProductChanges] = React.useState<Array<any>>([])
   const [historicalGrowth, setHistoricalGrowth] = React.useState<Array<any>>([])
   const [error, setError] = React.useState<string | null>(null)
@@ -241,9 +241,7 @@ export function PerformanceTracker() {
   const hasAnyData = lines.some((l) => l.isValid && !l.isDuplicate && l.date)
   const isLoading = initialLoading || computing
   const hasError = error != null
-  const noPeriod = !applied
 
-  // Resolve applied selection to an inclusive date range.
   React.useEffect(() => {
     let resolved: ResolvedPeriod | null = null
     if (applied) {
@@ -389,18 +387,67 @@ export function PerformanceTracker() {
   if (isLoading) {
     return (
       <div className="space-y-8">
-        <SectionHeader
-          title="Performance Tracker"
-          description="Compare performance across periods using mathematical calculations only."
-          action={
-            <ReportingPeriodNavigator
-              lines={lines}
-              applied={applied}
-              onApply={setApplied}
-              selectLabel="Select Period"
-            />
-          }
-        />
+        <div className="flex flex-col sm:flex-row items-center w-full gap-6 mb-8">
+          <div className="min-w-0 flex-1">
+            <h2 className="section-title">Performance Tracker</h2>
+            <p className="section-subtitle">Compare performance across periods using mathematical calculations only.</p>
+          </div>
+          <div className="w-full shrink-0 sm:w-[48%]">
+            <Button
+              variant="brand-gold"
+              size="sm"
+              className="flex w-full h-[44px] items-center justify-center whitespace-nowrap rounded-full px-3"
+              onClick={() => setPeriodOpen(true)}
+              aria-expanded={periodOpen}
+            >
+              Select Reporting Period
+            </Button>
+          </div>
+        </div>
+
+        {/* Full-width reporting-period bar */}
+        <div className="bg-cream border border-border rounded-xl p-4 md:p-5">
+          {range ? (
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] text-rain font-medium uppercase tracking-wider">Analyzing:</span>
+                <span className="font-serif text-ink">{range.label}</span>
+                {range.startDate && range.endDate && (
+                  <span className="text-[10px] text-rain/60">
+                    {range.startDate} → {range.endDate}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    clearApplied()
+                    setPeriodOpen(false)
+                  }}
+                >
+                  Clear
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <p className="text-[12px] text-rain/70 text-center sm:text-left">
+              Select a reporting period to begin analysis.
+            </p>
+          )}
+        </div>
+
+        {/* Hierarchical reporting-period navigator (opens below the bar) */}
+        {periodOpen && (
+          <ReportingPeriodNavigator
+            lines={lines}
+            applied={applied}
+            onApply={setApplied}
+            open={periodOpen}
+            onOpenChange={setPeriodOpen}
+          />
+        )}
         <div className="card-premium p-4">
           <p className="text-rain/60 text-sm">Loading sales data…</p>
         </div>
@@ -470,22 +517,71 @@ export function PerformanceTracker() {
 
   return (
     <div className="space-y-8">
-      <SectionHeader
-        title="Performance Tracker"
-        description="Compare performance across periods using mathematical calculations only."
-        action={
-          <ReportingPeriodNavigator
-            lines={lines}
-            applied={applied}
-            onApply={setApplied}
-            selectLabel="Select Period"
-          />
-        }
-      />
+      <div className="flex flex-col sm:flex-row items-center w-full gap-6 mb-8">
+        <div className="min-w-0 flex-1">
+          <h2 className="section-title">Performance Tracker</h2>
+          <p className="section-subtitle">Compare performance across periods using mathematical calculations only.</p>
+        </div>
+        <div className="w-full shrink-0 sm:w-[48%]">
+          <Button
+            variant="brand-gold"
+            size="sm"
+            className="flex w-full h-[44px] items-center justify-center whitespace-nowrap rounded-full px-3"
+            onClick={() => setPeriodOpen(true)}
+            aria-expanded={periodOpen}
+          >
+            Select Reporting Period
+          </Button>
+        </div>
+      </div>
+
+      {/* Full-width reporting-period bar */}
+      <div className="bg-cream border border-border rounded-xl p-4 md:p-5">
+        {range ? (
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-rain font-medium uppercase tracking-wider">Analyzing:</span>
+              <span className="font-serif text-ink">{range.label}</span>
+              {range.startDate && range.endDate && (
+                <span className="text-[10px] text-rain/60">
+                  {range.startDate} → {range.endDate}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  clearApplied()
+                  setPeriodOpen(false)
+                }}
+              >
+                Clear
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <p className="text-[12px] text-rain/70 text-center sm:text-left">
+            Select a reporting period to begin analysis.
+          </p>
+        )}
+      </div>
+
+      {/* Hierarchical reporting-period navigator (opens below the bar) */}
+      {periodOpen && (
+        <ReportingPeriodNavigator
+          lines={lines}
+          applied={applied}
+          onApply={setApplied}
+          open={periodOpen}
+          onOpenChange={setPeriodOpen}
+        />
+      )}
 
       {/* Reporting-period status area */}
       {hasError && (
-        <div className="p-3 rounded bg-[#f5dede]/30 border border-[#8a2f1d]/30 text-sm text-[#8a2f1d] flex items-center gap-2">
+        <div className="p-3 rounded bg-terracotta/15 border border-terracotta/30 text-sm text-terracotta flex items-center gap-2">
           {error}
           <Button variant="outline" size="sm" onClick={loadData}>
             Retry
@@ -499,37 +595,6 @@ export function PerformanceTracker() {
           <Button variant="outline" size="sm" asChild>
             <Link to="/upload">Upload Data</Link>
           </Button>
-        </div>
-      )}
-
-      {noPeriod && hasAnyData && !hasError && (
-        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#f3e8d3]/30 border border-[#a6533f]/30 text-[#a6533f] text-sm font-medium">
-          Select a reporting period to begin analysis.
-        </div>
-      )}
-
-      {/* Applied period banner */}
-      {range && !hasError && (
-        <div className="flex items-center justify-between px-0">
-          <div className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-[#d8e8dc]/60 border border-[#1e5e3a]/30 text-[#1e5e3a] text-sm font-medium">
-            <span>Analyzing:</span>
-            <span className="font-serif text-ink">{range.label}</span>
-            {range.startDate && range.endDate && (
-              <span className="text-rain/60 text-xs">
-                {range.startDate} → {range.endDate}
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => clearApplied()}
-              className="text-rain/60 hover:text-rain"
-            >
-              Clear
-            </Button>
-          </div>
         </div>
       )}
 

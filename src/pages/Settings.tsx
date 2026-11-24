@@ -470,8 +470,8 @@ export function Settings() {
                       <span className={cn(
                         'inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium',
                         p.isActive
-                          ? 'bg-[#d8e8dc]/60 text-[#1e5e3a] border border-[#1e5e3a]/30'
-                          : 'bg-[#f5dede]/60 text-[#8a2f1d] border border-[#8a2f1d]/30'
+                          ? 'bg-sage/15 text-forest border border-sage/30'
+                          : 'bg-terracotta/15 text-terracotta border border-terracotta/30'
                       )}>
                         {p.isActive ? 'Active' : 'Inactive'}
                       </span>

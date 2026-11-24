@@ -116,18 +116,23 @@ export interface SidebarProps {
 }
 
 export function Sidebar({ activePath, onItemClick, onClose, collapsed, className }: SidebarProps) {
+  const now = new Date()
+  const hour = now.getHours()
+  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
+
   return (
     <aside
       className={cn(
-        'inset-y-0 left-0 z-40 bg-forest text-cream border-r border-[rgba(243,232,211,0.22)] flex flex-col transition-all duration-300 ease-in-out',
+        'inset-y-0 left-0 z-40 bg-forest text-creamSoft border-r border-[rgba(255,255,255,0.12)] flex flex-col transition-all duration-300 ease-in-out',
         collapsed ? 'w-20' : 'w-64',
         className,
       )}
       aria-label="Navigation"
     >
-      <div className="flex items-center justify-between px-3 py-5">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded bg-gold flex items-center justify-center">
+      {/* Header: Logo + location */}
+      <div className="flex flex-col px-4 py-6 border-b border-[rgba(255,255,255,0.10)]">
+        <div className="flex items-center gap-2.5 mb-3">
+          <div className="w-9 h-9 rounded-xl bg-gold flex items-center justify-center">
             <svg className="w-5 h-5 text-coffee" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
               <path d="M5 19a2 2 0 012-2h7a2 2 0 012 2v3a2 2 0 01-2 2H7a2 2 0 01-2-2v-3z" />
               <path d="M12 17a2 2 0 012-2h7a2 2 0 012 2v3a2 2 0 01-2 2h-7a2 2 0 01-2-2v-3z" />
@@ -135,25 +140,22 @@ export function Sidebar({ activePath, onItemClick, onClose, collapsed, className
             </svg>
           </div>
           {!collapsed && (
-            <div className="font-serif text-xl font-semibold text-cream tracking-tight leading-none">
-              MIST &amp; MUG
+            <div className="flex flex-col">
+              <div className="font-serif text-xl font-semibold text-cream tracking-tight leading-none">MIST &amp; MUG</div>
+              <div className="text-[10px] text-creamMuted font-sans font-medium uppercase tracking-wider">Mussoorie · 2,005 m</div>
             </div>
           )}
         </div>
         {!collapsed && (
-          <button
-            onClick={onClose}
-            aria-label="Close sidebar"
-            className="p-2 rounded-md text-rain/50 hover:text-cream hover:bg-[rgba(243,232,211,0.1)] transition-colors"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-              <path d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+          <div className="flex items-center gap-2 pt-3">
+            <div className="w-2 h-2 rounded-full bg-gold animate-pulse" />
+            <span className="text-[11px] text-creamMuted font-sans medium">{greeting}, Owner</span>
+          </div>
         )}
       </div>
 
-      <nav className="flex-1 px-2 py-3 space-y-1">
+      {/* Navigation */}
+      <nav className="flex-1 px-2 py-3 space-y-0.5">
         {SIDEBAR_ITEMS.map((item) => {
           const isActive = activePath === item.href
           return (
@@ -165,18 +167,51 @@ export function Sidebar({ activePath, onItemClick, onClose, collapsed, className
               aria-label={item.label}
               aria-current={isActive ? 'page' : undefined}
               className={cn(
-                'flex items-center gap-3 w-full px-3 py-3 rounded-lg text-sm font-medium transition-all',
+                'flex items-center gap-3 w-full px-3 py-3 rounded-xl text-sm font-medium transition-all',
                 isActive
-                  ? 'bg-[rgba(240,179,90,0.15)] text-gold border border-[rgba(240,179,90,0.3)] shadow-sm'
-                  : 'text-rain/60 hover:text-cream hover:bg-[rgba(243,232,211,0.05)]',
+                  ? 'bg-[rgba(232,165,75,0.12)] text-goldActive border border-[rgba(232,165,75,0.25)] shadow-sm'
+                  : 'text-creamSoft hover:text-creamSoft hover:bg-[rgba(255,255,255,0.05)]',
+                collapsed ? 'justify-center px-2' : 'justify-start',
               )}
             >
-              <item.icon className={cn(isActive ? 'text-gold' : 'text-rain/50')} />
+              <item.icon className={cn(isActive ? 'text-goldActive' : 'text-creamIcon')} />
               {!collapsed && item.label}
             </button>
           )
         })}
       </nav>
+
+      {/* Owner profile at bottom */}
+      <div className="mt-auto px-4 py-6 border-t border-[rgba(255,255,255,0.10)]">
+        {!collapsed && (
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full bg-gold/20 flex items-center justify-center overflow-hidden">
+              <svg className="w-4 h-4 text-gold" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <path d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+              </svg>
+            </div>
+            <div className="flex flex-col min-w-0">
+              <div className="font-serif text-sm font-semibold text-cream leading-none truncate">Owner</div>
+              <div className="text-[10px] text-creamMuted font-sans truncate">mistmug@cafe.in</div>
+            </div>
+          </div>
+        )}
+        <div className="mt-4 flex items-center gap-2">
+          <button
+            onClick={onClose}
+            aria-label="Collapse sidebar"
+            className="w-9 h-9 rounded-lg bg-[rgba(255,255,255,0.08)] flex items-center justify-center text-creamSoft hover:text-creamSoft hover:bg-[rgba(255,255,255,0.15)] transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              {collapsed ? (
+                <path d="M9 5l7 7-7 7" />
+              ) : (
+                <path d="M15 19l-7-7 7-7" />
+              )}
+            </svg>
+          </button>
+        </div>
+      </div>
     </aside>
   )
 }

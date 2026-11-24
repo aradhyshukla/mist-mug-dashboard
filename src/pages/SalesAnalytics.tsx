@@ -15,7 +15,6 @@
  */
 
 import * as React from 'react'
-import { SectionHeader } from '@/components/common/EmptyState'
 import { ReportingPeriodNavigator } from '@/components/common/ReportingPeriodNavigator'
 import {
   computeDashboardMetrics,
@@ -165,22 +164,22 @@ function WeekdayVsWeekendPlaceholder() {
       </div>
 
       <div className="grid grid-cols-2 gap-4 mt-6">
-        <div className="p-4 bg-[#d8e8dc]/30 rounded-lg border border-[#1e5e3a]/30">
-          <p className="text-xs text-[#1e5e3a] uppercase tracking-wider">Weekday Revenue</p>
+        <div className="p-4 bg-sage/15 rounded-lg border border-sage/30">
+          <p className="text-xs text-forest uppercase tracking-wider">Weekday Revenue</p>
           <p className="text-lg font-serif text-ink text-rain/40">—</p>
         </div>
-        <div className="p-4 bg-[#f3e8d3]/30 rounded-lg border border-[#a6533f]/30">
-          <p className="text-xs text-[#a6533f] uppercase tracking-wider">Weekend Revenue</p>
+        <div className="p-4 bg-terracotta/15 rounded-lg border border-terracotta/30">
+          <p className="text-xs text-terracotta uppercase tracking-wider">Weekend Revenue</p>
           <p className="text-lg font-serif text-ink text-rain/40">—</p>
         </div>
       </div>
       <div className="grid grid-cols-2 gap-4 mt-4">
-        <div className="p-4 bg-[#d8e8dc]/30 rounded-lg border border-[#1e5e3a]/30">
-          <p className="text-xs text-[#1e5e3a] uppercase tracking-wider">Avg per Weekday</p>
+        <div className="p-4 bg-sage/15 rounded-lg border border-sage/30">
+          <p className="text-xs text-forest uppercase tracking-wider">Avg per Weekday</p>
           <p className="text-lg font-serif text-ink text-rain/40">—</p>
         </div>
-        <div className="p-4 bg-[#f3e8d3]/30 rounded-lg border border-[#a6533f]/30">
-          <p className="text-xs text-[#a6533f] uppercase tracking-wider">Avg per Weekend Day</p>
+        <div className="p-4 bg-terracotta/15 rounded-lg border border-terracotta/30">
+          <p className="text-xs text-terracotta uppercase tracking-wider">Avg per Weekend Day</p>
           <p className="text-lg font-serif text-ink text-rain/40">—</p>
         </div>
       </div>
@@ -233,9 +232,14 @@ export function SalesAnalytics() {
   const [trendData, setTrendData] = React.useState<Array<any>>([])
   const [granularity, setGranularity] = React.useState<'Daily' | 'Monthly' | 'Yearly'>('Daily')
   const [periodRangeLabel, setPeriodRangeLabel] = React.useState('')
+  const [periodOpen, setPeriodOpen] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
 
   const [range, setRange] = React.useState<ResolvedPeriod | null>(null)
+
+  // Monotonically increasing id used to ignore analytics responses from
+  // requests that are superseded by a Clear or new selection.
+  const analyticsRequestId = React.useRef(0)
 
   const hasAnyData = lines.some((l) => l.isValid && !l.isDuplicate && l.date)
   const isLoading = initialLoading || computing
@@ -271,8 +275,22 @@ export function SalesAnalytics() {
 
   // Recompute when data or applied range changes.
   React.useEffect(() => {
-    if (!range) return
-    loadAnalytics()
+    if (!range) {
+      // Clear was clicked (or selection invalidated): reset every period-dependent
+      // display so stale metrics/charts/tables never linger.
+      analyticsRequestId.current += 1
+      setMetrics(null)
+      setTopProducts([])
+      setHourlyData([])
+      setWeekdayWeekend(null)
+      setTrendData([])
+      setGranularity('Daily')
+      setPeriodRangeLabel('')
+      setError(null)
+      return
+    }
+    const requestId = ++analyticsRequestId.current
+    loadAnalytics(requestId)
   }, [range])
 
   // Recompute when data changes (e.g. after upload deletion or product edit).
@@ -282,20 +300,26 @@ export function SalesAnalytics() {
       // Product edits don't change import lines, so the [range] effect won't
       // re-fire. Explicitly recompute analytics so category reattribution takes
       // effect immediately (e.g. after editing a product category).
-      if (range) loadAnalytics()
+      if (range) loadAnalytics(++analyticsRequestId.current)
     })
     return unsubscribe
   }, [range])
 
-  async function loadAnalytics() {
+  async function loadAnalytics(requestId: number) {
+    if (requestId !== analyticsRequestId.current) return
     setComputing(true)
     setError(null)
     try {
       const { startDate: start, endDate: end } = range!
+      if (requestId !== analyticsRequestId.current) return
       const m = await computeDashboardMetrics(start, end)
+      if (requestId !== analyticsRequestId.current) return
       const tp = await computeTopProducts(start, end, Infinity)
+      if (requestId !== analyticsRequestId.current) return
       const hd = await computeHourlyData(start, end)
+      if (requestId !== analyticsRequestId.current) return
       const ww = await computeWeekdayWeekend(start, end)
+      if (requestId !== analyticsRequestId.current) return
 
       let granularity: 'Daily' | 'Monthly' | 'Yearly' = 'Daily'
       let td: TrendBucket[]
@@ -319,6 +343,7 @@ export function SalesAnalytics() {
             itemsSold: d.itemsSold,
           }))
       }
+      if (requestId !== analyticsRequestId.current) return
 
       setMetrics(m)
       setTopProducts(tp)
@@ -328,26 +353,77 @@ export function SalesAnalytics() {
       setGranularity(granularity)
       setPeriodRangeLabel(`${formatDate(start)} – ${formatDate(end)}`)
     } catch (err) {
+      if (requestId !== analyticsRequestId.current) return
       setError(err instanceof Error ? err.message : 'Failed to load analytics')
     } finally {
+      if (requestId !== analyticsRequestId.current) return
       setComputing(false)
     }
   }
 
   return (
     <div className="space-y-8">
-      <SectionHeader
-        title="Sales Analytics"
-        description="Real analytics computed from imported sales data."
-        action={
-          <ReportingPeriodNavigator
-            lines={lines}
-            applied={applied}
-            onApply={setApplied}
-            selectLabel="Select Period"
-          />
-        }
-      />
+      <div className="flex flex-col sm:flex-row items-center w-full gap-6 mb-8">
+        <div className="min-w-0 flex-1">
+          <h2 className="section-title">Sales Analytics</h2>
+          <p className="section-subtitle">Real analytics computed from imported sales data.</p>
+        </div>
+        <div className="w-full shrink-0 sm:w-[48%]">
+          <Button
+            variant="brand-gold"
+            size="sm"
+            className="flex w-full h-[44px] items-center justify-center whitespace-nowrap rounded-full px-3"
+            onClick={() => setPeriodOpen(true)}
+            aria-expanded={periodOpen}
+          >
+            Select Reporting Period
+          </Button>
+        </div>
+      </div>
+
+      {/* Full-width reporting-period bar */}
+      <div className="bg-cream border border-border rounded-xl p-4 md:p-5">
+        {range ? (
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-rain font-medium uppercase tracking-wider">Analyzing:</span>
+              <span className="font-serif text-ink">{range.label}</span>
+              {range.startDate && range.endDate && (
+                <span className="text-[10px] text-rain/60">
+                  {range.startDate} → {range.endDate}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  clearApplied()
+                  setPeriodOpen(false)
+                }}
+              >
+                Clear
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <p className="text-[12px] text-rain/70 text-center sm:text-left">
+            Select a reporting period to begin analysis.
+          </p>
+        )}
+      </div>
+
+      {/* Hierarchical reporting-period navigator (opens below the bar) */}
+      {periodOpen && (
+        <ReportingPeriodNavigator
+          lines={lines}
+          applied={applied}
+          onApply={setApplied}
+          open={periodOpen}
+          onOpenChange={setPeriodOpen}
+        />
+      )}
 
       {/* Error state */}
       {hasError && (
@@ -361,7 +437,7 @@ export function SalesAnalytics() {
 
       {/* No imported data */}
       {!hasAnyData && !hasError && (
-        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#f3e8d3]/30 border border-[#a6533f]/30 text-[#a6533f] text-sm font-medium">
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-terracotta/15 border border-terracotta/30 text-terracotta text-sm font-medium">
           No sales data imported yet.
           <Button variant="outline" size="sm" asChild>
             <Link to="/upload">Upload Data</Link>
@@ -369,41 +445,9 @@ export function SalesAnalytics() {
         </div>
       )}
 
-      {/* No period selected */}
-      {noPeriod && hasAnyData && !hasError && (
-        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#f3e8d3]/30 border border-[#a6533f]/30 text-[#a6533f] text-sm font-medium">
-          Select a reporting period to begin analysis.
-        </div>
-      )}
-
-      {/* Applied period banner */}
-      {range && !hasError && (
-        <div className="flex items-center justify-between px-0">
-          <div className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-[#d8e8dc]/60 border border-[#1e5e3a]/30 text-[#1e5e3a] text-sm font-medium">
-            <span>Analyzing:</span>
-            <span className="font-serif text-ink">{range.label}</span>
-            {range.startDate && range.endDate && (
-              <span className="text-rain/60 text-xs">
-                {range.startDate} → {range.endDate}
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => clearApplied()}
-              className="text-rain/60 hover:text-rain"
-            >
-              Clear
-            </Button>
-          </div>
-        </div>
-      )}
-
       {/* Empty selected period */}
       {range && hasAnyData && !periodHasData && !hasError && (
-        <div className="p-3 rounded bg-[#f3e8d3]/30 border border-[#a6533f]/30 text-sm text-[#a6533f]">
+        <div className="p-3 rounded bg-terracotta/15 border border-terracotta/30 text-sm text-terracotta">
           No transactions found for the selected period.
         </div>
       )}

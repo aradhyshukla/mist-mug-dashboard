@@ -43,10 +43,12 @@ interface ReportingPeriodNavigatorProps {
   applied: ReportingPeriodSelection | null
   /** Called when the user clicks Apply with a valid pending selection. */
   onApply: (selection: ReportingPeriodSelection) => void
-  /** Label shown on the select trigger button when nothing is applied. */
-  selectLabel?: string
   /** Whether the navigator panel is initially open. */
   defaultOpen?: boolean
+  /** Controlled open state of the panel. */
+  open?: boolean
+  /** Callback when the open state changes. */
+  onOpenChange?: (open: boolean) => void
 }
 
 type Mode = 'root' | 'years' | 'months' | 'weeks'
@@ -77,10 +79,16 @@ export function ReportingPeriodNavigator({
   lines,
   applied,
   onApply,
-  selectLabel = 'Select Period',
   defaultOpen = false,
+  open: openProp,
+  onOpenChange,
 }: ReportingPeriodNavigatorProps) {
-  const [open, setOpen] = React.useState(defaultOpen)
+  const [openInternal, setOpenInternal] = React.useState(defaultOpen)
+  const isOpen = openProp ?? openInternal
+  const handleOpenChange = (v: boolean) => {
+    if (onOpenChange) onOpenChange(v)
+    else setOpenInternal(v)
+  }
   const [mode, setMode] = React.useState<Mode>('root')
   const [pending, setPending] = React.useState<ReportingPeriodSelection | null>(
     applied ?? null
@@ -183,16 +191,8 @@ export function ReportingPeriodNavigator({
   const handleApply = () => {
     if (!pendingValid) return
     onApply(pending)
-    setOpen(false)
+    handleOpenChange(false)
   }
-
-  const appliedLabel = React.useMemo(() => {
-    if (!applied) return null
-    const resolved = resolveSelection(applied, lines)
-    return resolved?.label ?? null
-  }, [applied, lines])
-
-  const triggerLabel = applied ? `Change Period (${appliedLabel})` : selectLabel
 
   const isYearSelected = (year: number) => {
     if (!pending || pending.kind !== 'year') return false
@@ -207,38 +207,17 @@ export function ReportingPeriodNavigator({
     return pending.weekIndex === weekIndex
   }
 
-  return (
-    <div className="flex flex-col gap-2">
-      {/* Select trigger (placed in the header action slot, top-right) */}
-      <Button
-        variant="outline"
-        size="sm"
-        className="min-w-[160px]"
-        onClick={() => {
-          setOpen((prev) => {
-            if (!prev) {
-              setPending(applied ?? null)
-              setMode('root')
-            }
-            return !prev
-          })
-        }}
-        aria-expanded={open}
-        aria-controls="reporting-period-navigator-panel"
-      >
-        {open ? 'Close' : triggerLabel}
-      </Button>
+  if (!isOpen) return null
 
-      {/* Apply control + hierarchical panel (rendered inline when open) */}
-      {open && (
-        <div
-          id="reporting-period-navigator-panel"
-          role="region"
-          aria-label="Reporting period selection"
-          className="card-premium p-6 rounded-xl border border-line bg-cream shadow-md w-full max-w-xs"
-        >
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="font-serif text-base text-ink">Select Reporting Period</h3>
+  return (
+    <div
+      id="reporting-period-navigator-panel"
+      role="region"
+      aria-label="Reporting period selection"
+      className="card-premium p-6 rounded-xl border border-line bg-cream shadow-md w-full"
+    >
+      <div className="flex items-center justify-between mb-6">
+        <h3 className="font-serif text-base text-ink">Select Reporting Period</h3>
             <Button
               variant="brand"
               size="sm"
@@ -383,8 +362,6 @@ export function ReportingPeriodNavigator({
             </div>
           )}
         </div>
-      )}
-    </div>
   )
 }
 
