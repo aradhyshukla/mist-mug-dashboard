@@ -18,16 +18,21 @@ import type { ResolvedPeriod } from '@/lib/reporting-periods'
 export type EvidenceStrength = 'strong' | 'moderate' | 'limited'
 
 // ---------------------------------------------------------------------------
-// Insight category / type
+// Insight category / type (10 analytical families)
 // ---------------------------------------------------------------------------
 
 export type InsightType =
+  | 'revenue-growth'
+  | 'revenue-decline'
+  | 'peak-sales-hours'
+  | 'low-activity-hours'
   | 'weekday-weekend'
-  | 'busiest-hours'
-  | 'top-products'
-  | 'revenue-trend'
   | 'average-order-value'
+  | 'order-volume-change'
+  | 'top-selling-products'
+  | 'underperforming-products'
   | 'revenue-concentration'
+  | 'revenue-trend'
 
 // ---------------------------------------------------------------------------
 // Supporting metric displayed on an insight card
@@ -98,4 +103,5 @@ export interface InsightCandidate {
   limitation?: string
   valid: boolean
   validationErrors: string[]
+  family: string // analytical family for controlled variety grouping
 }

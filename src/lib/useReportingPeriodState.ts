@@ -5,9 +5,11 @@
  * navigator instantiates its own hook so pending and applied selections are
  * independent per page.
  *
- * The applied selection is persisted to localStorage and validated against the
+ * The applied selection is persisted to sessionStorage and validated against the
  * current transaction data on mount (and whenever data changes), so a stale
  * selection is never restored after its underlying sales data has been removed.
+ * sessionStorage is session-scoped: it survives refreshes in the same tab but is
+ * not shared across independent browser sessions/tabs.
  */
 
 import * as React from 'react'
@@ -56,6 +58,27 @@ export function useReportingPeriodState({
     }
   }, [applied, validLines, storageKey])
 
+  // Restore a persisted selection once data becomes available.
+  //
+  // The useState initializer runs before lines load (empty array), so the
+  // persisted selection cannot be validated at mount — validateSelection
+  // returns null against empty data and applied stays null forever.
+  // This effect retries restoration once validLines has data. When a user
+  // returns to a page, the previously applied period is restored and the
+  // page's range effect then recalculates analytics automatically.
+  React.useEffect(() => {
+    if (applied) return // already have an applied selection; nothing to restore
+    if (validLines.length === 0) return // no data yet; wait for next cycle
+    const persisted = readPersisted(storageKey)
+    if (!persisted) return
+    const restored = validateSelection(persisted, validLines)
+    if (restored) {
+      setAppliedState(restored)
+    }
+    // If restored is null, the persisted selection is stale; leave applied
+    // as null so the user must select a new period.
+  }, [validLines, storageKey, applied])
+
   const setApplied = React.useCallback(
     (selection: ReportingPeriodSelection | null) => {
       setAppliedState(selection)
@@ -77,13 +100,14 @@ export function useReportingPeriodState({
 }
 
 // ---------------------------------------------------------------
-// localStorage helpers
+// sessionStorage helpers (session-scoped: survives same-tab refresh,
+// cleared when a new independent browser session/tab is opened)
 // ---------------------------------------------------------------
 
 function readPersisted(key: string): ReportingPeriodSelection | null {
   if (typeof window === 'undefined') return null
   try {
-    const raw = window.localStorage.getItem(key)
+    const raw = window.sessionStorage.getItem(key)
     if (!raw) return null
     const parsed = JSON.parse(raw)
     return parsed && typeof parsed.kind === 'string' ? (parsed as ReportingPeriodSelection) : null
@@ -95,7 +119,7 @@ function readPersisted(key: string): ReportingPeriodSelection | null {
 function writePersisted(key: string, selection: ReportingPeriodSelection): void {
   if (typeof window === 'undefined') return
   try {
-    window.localStorage.setItem(key, JSON.stringify(selection))
+    window.sessionStorage.setItem(key, JSON.stringify(selection))
   } catch {
     // Storage may be disabled/quota-exceeded; persistence is optional.
   }
@@ -104,7 +128,7 @@ function writePersisted(key: string, selection: ReportingPeriodSelection): void 
 function removePersisted(key: string): void {
   if (typeof window === 'undefined') return
   try {
-    window.localStorage.removeItem(key)
+    window.sessionStorage.removeItem(key)
   } catch {
     // noop
   }

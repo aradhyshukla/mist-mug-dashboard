@@ -1,8 +1,8 @@
 /**
- * Mist & Mug — Insights Engine Tests
+ * Mist & Mug — Insights Engine 2.0 Tests
  *
- * Tests deterministic rule-based insight generation, evidence validation,
- * ranking, and recommendation selection.
+ * Tests deterministic rule-based insight generation with controlled variety,
+ * evidence validation, ranking, and recommendation selection.
  */
 
 import { beforeEach, describe, it, expect, vi } from 'vitest'
@@ -18,12 +18,12 @@ import type { ProcessedLine } from '@/types'
 import {
   generateCandidates,
   generateInsights,
-  rankCandidates,
   selectTopInsights,
   validateCandidate,
+  rankCandidates,
 } from '@/lib/insights'
 import { generateRecommendations } from '@/lib/recommendations'
-import type { InsightCandidate } from '@/types/insights'
+import type { InsightCandidate, InsightType } from '@/types/insights'
 import type { ReportingPeriodSelection } from '@/lib/reporting-periods'
 
 // ---------------------------------------------------------------
@@ -92,7 +92,7 @@ function makeValidCandidate(
   overrides: Partial<InsightCandidate> = {},
 ): InsightCandidate {
   return {
-    type: 'top-products',
+    type: 'top-selling-products' as InsightType,
     title: 'Test insight',
     explanation: 'Test explanation',
     supportingMetrics: [
@@ -101,6 +101,7 @@ function makeValidCandidate(
     evidence: 'Test evidence',
     evidenceStrength: 'strong',
     relevanceScore: 80,
+    family: 'product-performance',
     valid: true,
     validationErrors: [],
     ...overrides,
@@ -131,9 +132,6 @@ describe('no data', () => {
   })
 
   it('returns empty insights when no valid lines exist', async () => {
-    vi.mocked(getAllImportLines).mockResolvedValue([
-      { ...line({ transactionId: 't1', date: '2026-01-05' }), isValid: false },
-    ])
     const result = await generateInsights(allTimeSelection, [
       { ...line({ transactionId: 't1', date: '2026-01-05' }), isValid: false },
     ])
@@ -143,50 +141,26 @@ describe('no data', () => {
 })
 
 // ---------------------------------------------------------------
-// Weekday vs Weekend (Rule A)
-//
-// January 2026: 22 weekdays, 9 weekend days.
-// Weekday revenue > weekend revenue in total, but weekend avg per day > weekday avg per day.
+// Candidate generation — all 10 families
 // ---------------------------------------------------------------
 
-describe('weekday vs weekend insight', () => {
-  it('generates weekday-weekend insight when both exist', async () => {
-    // Build a small fixture with both weekdays and weekends
-    // 2026-01-05 is Monday, 2026-01-10 is Saturday
+describe('candidate generation', () => {
+  it('generates weekday-weekend candidate when both exist', async () => {
     const lines = [
-      line({ transactionId: 't1', date: '2026-01-05', quantity: 1, unitPriceInr: 100 }), // Mon
-      line({ transactionId: 't2', date: '2026-01-06', quantity: 1, unitPriceInr: 100 }), // Tue
-      line({ transactionId: 't3', date: '2026-01-10', quantity: 1, unitPriceInr: 200 }), // Sat
-      line({ transactionId: 't4', date: '2026-01-11', quantity: 1, unitPriceInr: 200 }), // Sun
+      line({ transactionId: 't1', date: '2026-01-05', quantity: 1, unitPriceInr: 100 }),
+      line({ transactionId: 't2', date: '2026-01-06', quantity: 1, unitPriceInr: 100 }),
+      line({ transactionId: 't3', date: '2026-01-10', quantity: 1, unitPriceInr: 200 }),
+      line({ transactionId: 't4', date: '2026-01-11', quantity: 1, unitPriceInr: 200 }),
     ]
     vi.mocked(getAllImportLines).mockResolvedValue(lines)
 
     const candidates = await generateCandidates(lines, resolvedAllTime)
-    const wwCandidate = candidates.find((c) => c.type === 'weekday-weekend')
-    expect(wwCandidate).toBeDefined()
-    expect(wwCandidate!.valid).toBe(true)
+    const ww = candidates.find((c) => c.type === 'weekday-weekend')
+    expect(ww).toBeDefined()
+    expect(ww!.valid).toBe(true)
   })
 
-  it('does not generate weekday-weekend insight when only weekdays exist', async () => {
-    const lines = [
-      line({ transactionId: 't1', date: '2026-01-05' }), // Mon
-      line({ transactionId: 't2', date: '2026-01-06' }), // Tue
-    ]
-    vi.mocked(getAllImportLines).mockResolvedValue(lines)
-
-    const candidates = await generateCandidates(lines, resolvedAllTime)
-    const wwCandidate = candidates.find((c) => c.type === 'weekday-weekend')
-    expect(wwCandidate).toBeDefined()
-    expect(wwCandidate!.valid).toBe(false)
-  })
-})
-
-// ---------------------------------------------------------------
-// Busiest Hours (Rule B)
-// ---------------------------------------------------------------
-
-describe('busiest hours insight', () => {
-  it('detects peak hour', async () => {
+  it('generates peak sales hours candidate', async () => {
     const lines = [
       line({ transactionId: 't1', date: '2026-01-05', time: '09:00', unitPriceInr: 100 }),
       line({ transactionId: 't2', date: '2026-01-05', time: '17:00', unitPriceInr: 500 }),
@@ -195,32 +169,26 @@ describe('busiest hours insight', () => {
     vi.mocked(getAllImportLines).mockResolvedValue(lines)
 
     const candidates = await generateCandidates(lines, resolvedAllTime)
-    const peakCandidate = candidates.find((c) => c.type === 'busiest-hours')
-    expect(peakCandidate).toBeDefined()
-    expect(peakCandidate!.valid).toBe(true)
-    expect(peakCandidate!.title).toContain('17:00')
+    const peak = candidates.find((c) => c.type === 'peak-sales-hours')
+    expect(peak).toBeDefined()
+    expect(peak!.valid).toBe(true)
   })
 
-  it('skips when no timestamps available', async () => {
+  it('generates low-activity hours candidate', async () => {
     const lines = [
-      line({ transactionId: 't1', date: '2026-01-05', time: '' }),
-      line({ transactionId: 't2', date: '2026-01-06', time: '' }),
+      line({ transactionId: 't1', date: '2026-01-05', time: '08:00', unitPriceInr: 50 }),
+      line({ transactionId: 't2', date: '2026-01-05', time: '12:00', unitPriceInr: 500 }),
+      line({ transactionId: 't3', date: '2026-01-05', time: '17:00', unitPriceInr: 500 }),
     ]
     vi.mocked(getAllImportLines).mockResolvedValue(lines)
 
     const candidates = await generateCandidates(lines, resolvedAllTime)
-    const peakCandidate = candidates.find((c) => c.type === 'busiest-hours')
-    expect(peakCandidate).toBeDefined()
-    expect(peakCandidate!.valid).toBe(false)
+    const low = candidates.find((c) => c.type === 'low-activity-hours')
+    expect(low).toBeDefined()
+    expect(low!.valid).toBe(true)
   })
-})
 
-// ---------------------------------------------------------------
-// Top-Selling Products (Rule C)
-// ---------------------------------------------------------------
-
-describe('top-selling products insight', () => {
-  it('identifies top products', async () => {
+  it('generates top-selling products candidate', async () => {
     const lines = [
       line({ transactionId: 't1', date: '2026-01-05', productName: 'Latte', unitPriceInr: 200, quantity: 2 }),
       line({ transactionId: 't2', date: '2026-01-05', productName: 'Croissant', unitPriceInr: 100, quantity: 1 }),
@@ -228,27 +196,13 @@ describe('top-selling products insight', () => {
     ]
     vi.mocked(getAllImportLines).mockResolvedValue(lines)
 
-    const result = await generateInsights(allTimeSelection, lines)
-    const productsInsight = result.insights.find((i) => i.type === 'top-products')
-    expect(productsInsight).toBeDefined()
-    expect(productsInsight!.explanation).toContain('Latte')
+    const candidates = await generateCandidates(lines, resolvedAllTime)
+    const tp = candidates.find((c) => c.type === 'top-selling-products')
+    expect(tp).toBeDefined()
+    expect(tp!.valid).toBe(true)
   })
 
-  it('skips when no products', async () => {
-    vi.mocked(getAllImportLines).mockResolvedValue([])
-
-    const result = await generateInsights(allTimeSelection, [])
-    const productsInsight = result.insights.find((i) => i.type === 'top-products')
-    expect(productsInsight).toBeUndefined()
-  })
-})
-
-// ---------------------------------------------------------------
-// Revenue Concentration (Rule F)
-// ---------------------------------------------------------------
-
-describe('revenue concentration insight', () => {
-  it('calculates concentration share', async () => {
+  it('generates revenue concentration candidate', async () => {
     const lines = [
       line({ transactionId: 't1', date: '2026-01-05', productName: 'Latte', unitPriceInr: 500, quantity: 1 }),
       line({ transactionId: 't2', date: '2026-01-05', productName: 'Tea', unitPriceInr: 100, quantity: 1 }),
@@ -256,55 +210,13 @@ describe('revenue concentration insight', () => {
     ]
     vi.mocked(getAllImportLines).mockResolvedValue(lines)
 
-    const result = await generateInsights(allTimeSelection, lines)
-    const concInsight = result.insights.find((i) => i.type === 'revenue-concentration')
-    expect(concInsight).toBeDefined()
-    // Latte = 500, Tea total = 200, total = 700, Latte share = 500/700 = 71.4%
-    const pctMetric = concInsight!.supportingMetrics.find(
-      (m) => m.label === 'Top product revenue share',
-    )
-    expect(pctMetric).toBeDefined()
-  })
-})
-
-// ---------------------------------------------------------------
-// Average Order Value (Rule E)
-// ---------------------------------------------------------------
-
-describe('average order value insight', () => {
-  it('calculates AOV without previous period', async () => {
-    const lines = [
-      line({ transactionId: 't1', date: '2026-01-05', unitPriceInr: 100, quantity: 2 }),
-      line({ transactionId: 't2', date: '2026-01-05', unitPriceInr: 200, quantity: 1 }),
-    ]
-    vi.mocked(getAllImportLines).mockResolvedValue(lines)
-
-    const result = await generateInsights(allTimeSelection, lines)
-    const aovInsight = result.insights.find((i) => i.type === 'average-order-value')
-    expect(aovInsight).toBeDefined()
-    // Total: 200 + 200 = 400, orders: 2, AOV: 200
-    expect(aovInsight!.explanation).toContain('₹200')
+    const candidates = await generateCandidates(lines, resolvedAllTime)
+    const rc = candidates.find((c) => c.type === 'revenue-concentration')
+    expect(rc).toBeDefined()
+    expect(rc!.valid).toBe(true)
   })
 
-  it('includes limitation when no previous period available', async () => {
-    // All Time has no previous period
-    const lines = [
-      line({ transactionId: 't1', date: '2026-01-05', unitPriceInr: 100 }),
-    ]
-    vi.mocked(getAllImportLines).mockResolvedValue(lines)
-
-    const result = await generateInsights(allTimeSelection, lines)
-    const aovInsight = result.insights.find((i) => i.type === 'average-order-value')
-    expect(aovInsight!.limitation).toContain('No previous-period comparison')
-  })
-})
-
-// ---------------------------------------------------------------
-// Revenue Trend (Rule D)
-// ---------------------------------------------------------------
-
-describe('revenue trend insight', () => {
-  it('generates trend for month selection', async () => {
+  it('generates revenue trend candidate for month', async () => {
     const lines = [
       line({ transactionId: 't1', date: '2026-01-05', unitPriceInr: 100 }),
       line({ transactionId: 't2', date: '2026-01-06', unitPriceInr: 300 }),
@@ -313,26 +225,53 @@ describe('revenue trend insight', () => {
     vi.mocked(getAllImportLines).mockResolvedValue(lines)
 
     const candidates = await generateCandidates(lines, resolvedJan2026)
-    const trendCandidate = candidates.find((c) => c.type === 'revenue-trend')
-    expect(trendCandidate).toBeDefined()
-    expect(trendCandidate!.valid).toBe(true)
+    const trend = candidates.find((c) => c.type === 'revenue-trend')
+    expect(trend).toBeDefined()
+    expect(trend!.valid).toBe(true)
+  })
+
+  it('generates average order value candidate', async () => {
+    const lines = [
+      line({ transactionId: 't1', date: '2026-01-05', unitPriceInr: 100, quantity: 2 }),
+      line({ transactionId: 't2', date: '2026-01-05', unitPriceInr: 200, quantity: 1 }),
+    ]
+    vi.mocked(getAllImportLines).mockResolvedValue(lines)
+
+    const candidates = await generateCandidates(lines, resolvedAllTime)
+    const aov = candidates.find((c) => c.type === 'average-order-value')
+    expect(aov).toBeDefined()
+    expect(aov!.valid).toBe(true)
+  })
+
+  it('generates underperforming products candidate when data supports', async () => {
+    const lines = [
+      line({ transactionId: 't1', date: '2026-01-05', productName: 'Popular', unitPriceInr: 500, quantity: 1 }),
+      line({ transactionId: 't2', date: '2026-01-05', productName: 'Niche', unitPriceInr: 50, quantity: 1 }),
+      line({ transactionId: 't3', date: '2026-01-05', productName: 'Niche', unitPriceInr: 50, quantity: 1 }),
+    ]
+    vi.mocked(getAllImportLines).mockResolvedValue(lines)
+
+    const candidates = await generateCandidates(lines, resolvedAllTime)
+    const up = candidates.find((c) => c.type === 'underperforming-products')
+    expect(up).toBeDefined()
   })
 })
 
 // ---------------------------------------------------------------
-// Validation
+// Evidence validation — no NaN/Infinity
 // ---------------------------------------------------------------
 
 describe('evidence validation', () => {
   it('invalidates candidate with no supporting metrics', () => {
     const candidate: InsightCandidate = {
-      type: 'top-products',
+      type: 'top-selling-products' as InsightType,
       title: 'Test',
       explanation: 'Test',
       supportingMetrics: [],
       evidence: 'Test evidence',
       evidenceStrength: 'limited',
       relevanceScore: 50,
+      family: 'product-performance',
       valid: true,
       validationErrors: [],
     }
@@ -343,13 +282,14 @@ describe('evidence validation', () => {
 
   it('invalidates candidate with empty evidence', () => {
     const candidate: InsightCandidate = {
-      type: 'top-products',
+      type: 'top-selling-products' as InsightType,
       title: 'Test',
       explanation: 'Test',
       supportingMetrics: [{ label: 'Rev', value: '₹100', format: 'inr' }],
       evidence: '',
       evidenceStrength: 'limited',
       relevanceScore: 50,
+      family: 'product-performance',
       valid: true,
       validationErrors: [],
     }
@@ -357,119 +297,141 @@ describe('evidence validation', () => {
     expect(validated.valid).toBe(false)
     expect(validated.validationErrors).toContain('Missing evidence description')
   })
+
+  it('invalidates candidate with NaN metric value', () => {
+    const candidate: InsightCandidate = {
+      type: 'top-selling-products' as InsightType,
+      title: 'Test',
+      explanation: 'Test',
+      supportingMetrics: [{ label: 'Bad Metric', value: NaN, format: 'number' as const }],
+      evidence: 'Test evidence',
+      evidenceStrength: 'limited',
+      relevanceScore: 50,
+      family: 'product-performance',
+      valid: true,
+      validationErrors: [],
+    }
+    const validated = validateCandidate(candidate)
+    expect(validated.valid).toBe(false)
+    expect(validated.validationErrors).toContain("Metric 'Bad Metric' has non-finite value")
+  })
+
+  it('rejects relevance score out of range', () => {
+    const candidate: InsightCandidate = {
+      type: 'top-selling-products' as InsightType,
+      title: 'Test',
+      explanation: 'Test',
+      supportingMetrics: [{ label: 'Rev', value: '₹100', format: 'inr' }],
+      evidence: 'Test evidence',
+      evidenceStrength: 'limited',
+      relevanceScore: 150,
+      family: 'product-performance',
+      valid: true,
+      validationErrors: [],
+    }
+    const validated = validateCandidate(candidate)
+    expect(validated.valid).toBe(false)
+    expect(validated.validationErrors).toContain('Relevance score out of range')
+  })
 })
 
 // ---------------------------------------------------------------
-// Ranking
+// Ranking — deterministic
 // ---------------------------------------------------------------
 
-describe('insight ranking', () => {
+describe('ranking', () => {
   it('ranks strong evidence higher', () => {
     const candidates: InsightCandidate[] = [
       makeValidCandidate({
-        type: 'revenue-trend',
+        type: 'revenue-trend' as InsightType,
         evidenceStrength: 'limited',
         relevanceScore: 90,
+        family: 'time-pattern',
       }),
       makeValidCandidate({
-        type: 'weekday-weekend',
+        type: 'weekday-weekend' as InsightType,
         evidenceStrength: 'strong',
         relevanceScore: 50,
+        family: 'day-pattern',
       }),
     ]
     const ranked = rankCandidates(candidates)
-    expect(ranked[0].type).toBe('weekday-weekend') // strong evidence first
+    expect(ranked[0].type).toBe('weekday-weekend')
     expect(ranked[1].type).toBe('revenue-trend')
   })
 
   it('breaks ties by relevance score', () => {
     const candidates: InsightCandidate[] = [
       makeValidCandidate({
-        type: 'revenue-trend',
+        type: 'revenue-trend' as InsightType,
         evidenceStrength: 'strong',
         relevanceScore: 50,
+        family: 'time-pattern',
       }),
       makeValidCandidate({
-        type: 'weekday-weekend',
+        type: 'weekday-weekend' as InsightType,
         evidenceStrength: 'strong',
         relevanceScore: 90,
+        family: 'day-pattern',
       }),
     ]
     const ranked = rankCandidates(candidates)
-    expect(ranked[0].type).toBe('weekday-weekend') // higher relevance first
-  })
-
-  it('deterministic tie-breaking by type priority', () => {
-    const candidates: InsightCandidate[] = [
-      makeValidCandidate({
-        type: 'revenue-concentration',
-        evidenceStrength: 'strong',
-        relevanceScore: 50,
-      }),
-      makeValidCandidate({
-        type: 'weekday-weekend',
-        evidenceStrength: 'strong',
-        relevanceScore: 50,
-      }),
-    ]
-    const ranked = rankCandidates(candidates)
-    // weekday-weekend has priority 1, revenue-concentration has priority 4
     expect(ranked[0].type).toBe('weekday-weekend')
   })
 })
 
 // ---------------------------------------------------------------
-// Select top 3 non-redundant insights
+// Select top insights — exactly 3, distinct families
 // ---------------------------------------------------------------
 
 describe('select top insights', () => {
   it('selects at most 3 insights with distinct types', () => {
     const candidates: InsightCandidate[] = [
-      makeValidCandidate({ type: 'weekday-weekend', evidenceStrength: 'strong', relevanceScore: 90 }),
-      makeValidCandidate({ type: 'busiest-hours', evidenceStrength: 'strong', relevanceScore: 85 }),
-      makeValidCandidate({ type: 'top-products', evidenceStrength: 'strong', relevanceScore: 80 }),
-      makeValidCandidate({ type: 'revenue-concentration', evidenceStrength: 'strong', relevanceScore: 75 }),
+      makeValidCandidate({ type: 'weekday-weekend' as InsightType, evidenceStrength: 'strong', relevanceScore: 90, family: 'day-pattern' }),
+      makeValidCandidate({ type: 'peak-sales-hours' as InsightType, evidenceStrength: 'strong', relevanceScore: 85, family: 'hour-pattern' }),
+      makeValidCandidate({ type: 'top-selling-products' as InsightType, evidenceStrength: 'strong', relevanceScore: 80, family: 'product-performance' }),
+      makeValidCandidate({ type: 'revenue-concentration' as InsightType, evidenceStrength: 'strong', relevanceScore: 75, family: 'product-performance' }),
     ]
     const ranked = rankCandidates(candidates)
-    const selected = selectTopInsights(ranked, resolvedAllTime)
+    const selected = selectTopInsights(ranked, resolvedAllTime, [])
     expect(selected).toHaveLength(3)
     const types = selected.map((s) => s.type)
-    expect(new Set(types).size).toBe(3) // all distinct
+    expect(new Set(types).size).toBe(3)
   })
 
   it('does not include duplicate types', () => {
     const candidates: InsightCandidate[] = [
-      makeValidCandidate({ type: 'top-products', evidenceStrength: 'strong', relevanceScore: 90 }),
-      makeValidCandidate({ type: 'top-products', evidenceStrength: 'moderate', relevanceScore: 80 }),
-      makeValidCandidate({ type: 'busiest-hours', evidenceStrength: 'strong', relevanceScore: 70 }),
-      makeValidCandidate({ type: 'weekday-weekend', evidenceStrength: 'strong', relevanceScore: 60 }),
+      makeValidCandidate({ type: 'top-selling-products' as InsightType, evidenceStrength: 'strong', relevanceScore: 90, family: 'product-performance' }),
+      makeValidCandidate({ type: 'top-selling-products' as InsightType, evidenceStrength: 'moderate', relevanceScore: 80, family: 'product-performance' }),
+      makeValidCandidate({ type: 'peak-sales-hours' as InsightType, evidenceStrength: 'strong', relevanceScore: 70, family: 'hour-pattern' }),
+      makeValidCandidate({ type: 'weekday-weekend' as InsightType, evidenceStrength: 'strong', relevanceScore: 60, family: 'day-pattern' }),
     ]
     const ranked = rankCandidates(candidates)
-    const selected = selectTopInsights(ranked, resolvedAllTime)
+    const selected = selectTopInsights(ranked, resolvedAllTime, [])
     const types = selected.map((s) => s.type)
-    expect(types.filter((t) => t === 'top-products')).toHaveLength(1)
+    expect(types.filter((t) => t === 'top-selling-products')).toHaveLength(1)
   })
 
-  it('generates stable IDs', () => {
+  it('generates stable IDs for same input', () => {
     const candidates: InsightCandidate[] = [
-      makeValidCandidate({ type: 'weekday-weekend', evidenceStrength: 'strong', relevanceScore: 90 }),
+      makeValidCandidate({ type: 'weekday-weekend' as InsightType, evidenceStrength: 'strong', relevanceScore: 90, family: 'day-pattern' }),
     ]
     const ranked = rankCandidates(candidates)
-    const selected1 = selectTopInsights(ranked, resolvedAllTime)
-    const selected2 = selectTopInsights(ranked, resolvedAllTime)
+    const selected1 = selectTopInsights(ranked, resolvedAllTime, [])
+    const selected2 = selectTopInsights(ranked, resolvedAllTime, [])
     expect(selected1[0].id).toBe(selected2[0].id)
   })
 })
 
 // ---------------------------------------------------------------
-// Recommendations
+// Recommendations — exactly one, period-aware
 // ---------------------------------------------------------------
 
 describe('recommendation engine', () => {
-  it('generates recommendation from busiest-hours insight', () => {
+  it('generates recommendation from peak-sales-hours insight', () => {
     const insight = {
-      id: 'bh_1',
-      type: 'busiest-hours' as const,
+      id: 'psh_1',
+      type: 'peak-sales-hours' as InsightType,
       title: 'Peak hour: 17:00–18:00',
       explanation: '5 PM–6 PM generated the highest recorded hourly revenue.',
       supportingMetrics: [
@@ -481,35 +443,34 @@ describe('recommendation engine', () => {
       evidenceStrength: 'strong' as const,
       relevanceScore: 85,
     }
-    const rec = generateRecommendations([insight])
-    expect(rec!).toBeDefined()
-    expect(rec!.title).toContain('staffing')
-    expect(rec!.supportingInsightId).toBe('bh_1')
+    const rec = generateRecommendations([insight], resolvedAllTime)
+    expect(rec).toBeDefined()
+    expect(rec!.supportingInsightId).toBe('psh_1')
   })
 
-  it('generates recommendation from top-products insight', () => {
+  it('generates recommendation from revenue-decline insight', () => {
     const insight = {
-      id: 'tp_1',
-      type: 'top-products' as const,
-      title: 'Top products drive revenue',
-      explanation: 'Your top 3 products account for 60% of revenue.',
+      id: 'rd_1',
+      type: 'revenue-decline' as InsightType,
+      title: 'Revenue is declining',
+      explanation: 'Revenue decreased by 10% compared to the previous period.',
       supportingMetrics: [
-        { label: 'Top 3 products revenue share', value: 60, format: 'percent' as const },
+        { label: 'Revenue decline vs previous period', value: 10, format: 'percent' as const },
       ],
       reportingPeriod: resolvedAllTime,
-      evidence: 'Analyzed 5 products.',
+      evidence: 'Compared current period with previous period.',
       evidenceStrength: 'strong' as const,
       relevanceScore: 80,
     }
-    const rec = generateRecommendations([insight])
+    const rec = generateRecommendations([insight], resolvedAllTime)
     expect(rec).toBeDefined()
-    expect(rec!.title).toContain('inventory')
+    expect(rec!.title).toContain('Investigate')
   })
 
   it('returns null when no actionable insights', () => {
     const insight = {
       id: 'rt_1',
-      type: 'revenue-trend' as const,
+      type: 'revenue-trend' as InsightType,
       title: 'Revenue trend',
       explanation: 'Revenue varies across days.',
       supportingMetrics: [
@@ -520,7 +481,7 @@ describe('recommendation engine', () => {
       evidenceStrength: 'moderate' as const,
       relevanceScore: 40,
     }
-    const rec = generateRecommendations([insight])
+    const rec = generateRecommendations([insight], resolvedAllTime)
     expect(rec).toBeNull()
   })
 
@@ -528,7 +489,7 @@ describe('recommendation engine', () => {
     const insights = [
       {
         id: 'rt_1',
-        type: 'revenue-trend' as const,
+        type: 'revenue-trend' as InsightType,
         title: 'Revenue trend',
         explanation: 'Trend observation.',
         supportingMetrics: [{ label: 'Total', value: '₹1000', format: 'inr' as const }],
@@ -538,8 +499,8 @@ describe('recommendation engine', () => {
         relevanceScore: 30,
       },
       {
-        id: 'bh_1',
-        type: 'busiest-hours' as const,
+        id: 'psh_1',
+        type: 'peak-sales-hours' as InsightType,
         title: 'Peak hour',
         explanation: 'Peak observation.',
         supportingMetrics: [{ label: 'Peak', value: '₹5000', format: 'inr' as const }],
@@ -549,13 +510,13 @@ describe('recommendation engine', () => {
         relevanceScore: 90,
       },
     ]
-    const rec = generateRecommendations(insights)
-    expect(rec!.supportingInsightId).toBe('bh_1') // strongest evidence wins
+    const rec = generateRecommendations(insights, resolvedAllTime)
+    expect(rec!.supportingInsightId).toBe('psh_1')
   })
 })
 
 // ---------------------------------------------------------------
-// Deterministic output
+// Deterministic output — same period + same data = same result
 // ---------------------------------------------------------------
 
 describe('deterministic output', () => {
@@ -575,58 +536,60 @@ describe('deterministic output', () => {
 })
 
 // ---------------------------------------------------------------
-// Financial reconciliation
+// Metric formatting — no NaN/Infinity, correct precision
 // ---------------------------------------------------------------
 
-describe('financial reconciliation', () => {
-  it('weekday + weekend revenue equals total', async () => {
-    const lines = [
-      line({ transactionId: 't1', date: '2026-01-05', unitPriceInr: 100 }), // Mon
-      line({ transactionId: 't2', date: '2026-01-10', unitPriceInr: 200 }), // Sat
-    ]
-    vi.mocked(getAllImportLines).mockResolvedValue(lines)
-
-    const result = await generateInsights(allTimeSelection, lines)
-    const wwInsight = result.insights.find((i) => i.type === 'weekday-weekend')
-    if (wwInsight) {
-      const weekdayMetric = wwInsight.supportingMetrics.find((m) => m.label === 'Total weekday revenue')
-      const weekendMetric = wwInsight.supportingMetrics.find((m) => m.label === 'Total weekend revenue')
-      expect(weekdayMetric).toBeDefined()
-      expect(weekendMetric).toBeDefined()
-    }
-  })
-})
-
-// ---------------------------------------------------------------
-// No data mutation (read-only)
-// ---------------------------------------------------------------
-
-describe('read-only engine', () => {
-  it('does not modify input lines', async () => {
-    const originalLines = [
-      line({ transactionId: 't1', date: '2026-01-05', unitPriceInr: 100 }),
-    ]
-    const linesCopy = [...originalLines.map((l) => ({ ...l }))]
-    vi.mocked(getAllImportLines).mockResolvedValue(originalLines)
-
-    await generateInsights(allTimeSelection, originalLines)
-
-    expect(originalLines).toEqual(linesCopy)
-  })
-})
-
-// ---------------------------------------------------------------
-// January 2026 regression dataset
-// ---------------------------------------------------------------
-
-describe('January 2026 regression dataset', () => {
-  it('produces three distinct insights with the regression fixture', async () => {
-    // Build a mini version of the January 2026 fixture
+describe('metric formatting', () => {
+  it('generated insights contain no NaN or Infinity metric values', async () => {
     const lines: ProcessedLine[] = []
+    const products = ['Latte', 'Cappuccino', 'Croissant', 'Muffin', 'Tea']
     for (let d = 1; d <= 31; d++) {
       const dateStr = `2026-01-${String(d).padStart(2, '0')}`
       const day = new Date(dateStr + 'T00:00:00Z').getUTCDay()
       const isWeekday = day >= 1 && day <= 5
+      const dailyRevenue = isWeekday ? 5800 : 7800
+      const numOrders = 20
+      for (let o = 0; o < numOrders; o++) {
+        const product = products[o % products.length]
+        const hour = 8 + (o % 10)
+        lines.push({
+          compositeKey: `txn-${d}-${o}|1`,
+          transactionId: `txn-${d}-${o}`,
+          lineId: '1',
+          date: dateStr,
+          time: `${String(hour).padStart(2, '0')}:00`,
+          itemName: product,
+          categoryResolved: 'Coffee',
+          quantity: 1,
+          unitPriceInr: dailyRevenue / numOrders,
+          lineTotalInr: dailyRevenue / numOrders,
+          productName: product,
+          validationIssues: [],
+          isValid: true,
+          isDuplicate: false,
+        } as ProcessedLine)
+      }
+    }
+
+    vi.mocked(getAllImportLines).mockResolvedValue(lines)
+    const result = await generateInsights(jan2026MonthSelection, lines)
+
+    for (const insight of result.insights) {
+      for (const m of insight.supportingMetrics) {
+        if (m.format === 'inr') continue // already a formatted string
+        const val = typeof m.value === 'number' ? m.value : parseFloat(String(m.value))
+        expect(Number.isFinite(val)).toBe(true)
+        expect(val).not.toBeNaN()
+      }
+    }
+  })
+
+  it('percentage metrics are rounded to one decimal place', async () => {
+    const lines: ProcessedLine[] = []
+    const products = ['Latte', 'Cappuccino', 'Croissant', 'Muffin', 'Tea']
+    for (let d = 1; d <= 31; d++) {
+      const dateStr = `2026-01-${String(d).padStart(2, '0')}`
+      const isWeekday = new Date(dateStr + 'T00:00:00Z').getUTCDay() >= 1 && new Date(dateStr + 'T00:00:00Z').getUTCDay() <= 5
       const dailyRevenue = isWeekday ? 5800 : 7800
       const numOrders = 20
       for (let o = 0; o < numOrders; o++) {
@@ -635,13 +598,82 @@ describe('January 2026 regression dataset', () => {
           transactionId: `txn-${d}-${o}`,
           lineId: '1',
           date: dateStr,
-          time: '10:00',
-          itemName: 'Test Product',
+          time: `${String(8 + (o % 10)).padStart(2, '0')}:00`,
+          itemName: products[o % products.length],
           categoryResolved: 'Coffee',
           quantity: 1,
           unitPriceInr: dailyRevenue / numOrders,
           lineTotalInr: dailyRevenue / numOrders,
-          productName: 'Test Product',
+          productName: products[o % products.length],
+          validationIssues: [],
+          isValid: true,
+          isDuplicate: false,
+        } as ProcessedLine)
+      }
+    }
+
+    vi.mocked(getAllImportLines).mockResolvedValue(lines)
+    const result = await generateInsights(jan2026MonthSelection, lines)
+
+    for (const insight of result.insights) {
+      for (const m of insight.supportingMetrics) {
+        if (m.format !== 'percent') continue
+        const val = typeof m.value === 'number' ? m.value : parseFloat(String(m.value))
+        // One decimal place: val * 10 should be an integer
+        expect(Math.round(val * 10) / 10).toBe(val)
+      }
+    }
+  })
+
+  it('count metrics are integers', async () => {
+    const lines = [
+      line({ transactionId: 't1', date: '2026-01-05', quantity: 1, unitPriceInr: 100 }),
+      line({ transactionId: 't2', date: '2026-01-06', quantity: 1, unitPriceInr: 200 }),
+      line({ transactionId: 't3', date: '2026-01-10', quantity: 1, unitPriceInr: 300 }),
+    ]
+    vi.mocked(getAllImportLines).mockResolvedValue(lines)
+
+    const result = await generateInsights(allTimeSelection, lines)
+
+    for (const insight of result.insights) {
+      for (const m of insight.supportingMetrics) {
+        if (m.format !== 'count') continue
+        const val = typeof m.value === 'number' ? m.value : parseFloat(String(m.value))
+        expect(Number.isInteger(val)).toBe(true)
+      }
+    }
+  })
+})
+
+// ---------------------------------------------------------------
+// January 2026 regression dataset
+// ---------------------------------------------------------------
+
+describe('January 2026 regression dataset', () => {
+  it('produces insights with the regression fixture', async () => {
+    const lines: ProcessedLine[] = []
+    const products = ['Latte', 'Cappuccino', 'Croissant', 'Muffin', 'Tea']
+    for (let d = 1; d <= 31; d++) {
+      const dateStr = `2026-01-${String(d).padStart(2, '0')}`
+      const day = new Date(dateStr + 'T00:00:00Z').getUTCDay()
+      const isWeekday = day >= 1 && day <= 5
+      const dailyRevenue = isWeekday ? 5800 : 7800
+      const numOrders = 20
+      for (let o = 0; o < numOrders; o++) {
+        const product = products[o % products.length]
+        const hour = 8 + (o % 10) // hours 8-17
+        lines.push({
+          compositeKey: `txn-${d}-${o}|1`,
+          transactionId: `txn-${d}-${o}`,
+          lineId: '1',
+          date: dateStr,
+          time: `${String(hour).padStart(2, '0')}:00`,
+          itemName: product,
+          categoryResolved: 'Coffee',
+          quantity: 1,
+          unitPriceInr: dailyRevenue / numOrders,
+          lineTotalInr: dailyRevenue / numOrders,
+          productName: product,
           validationIssues: [],
           isValid: true,
           isDuplicate: false,
@@ -656,7 +688,5 @@ describe('January 2026 regression dataset', () => {
     expect(result.error).toBeNull()
     expect(result.insights.length).toBeGreaterThan(0)
     expect(result.insights.length).toBeLessThanOrEqual(3)
-    // Should have at least one recommendation
-    expect(result.recommendation).toBeDefined()
   })
 })

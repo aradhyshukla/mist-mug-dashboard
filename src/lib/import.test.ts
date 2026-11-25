@@ -119,6 +119,44 @@ describe('suggestColumnMapping', () => {
     expect(mapping.transactionId).toBe('transaction-id')
   })
 
+  it('maps exact Item Name header to item_name', () => {
+    const mapping = suggestColumnMapping(['Transaction ID', 'Date', 'Item Name', 'Category', 'Quantity', 'Unit Price', 'Total Amount'])
+    expect(mapping.itemName).toBe('Item Name')
+  })
+
+  it('maps Item Name with underscore normalization', () => {
+    const mapping = suggestColumnMapping(['Transaction ID', 'Date', 'Item_Name', 'Quantity', 'Unit Price', 'Total Amount'])
+    expect(mapping.itemName).toBe('Item_Name')
+  })
+
+  it('maps Item Name with hyphen normalization', () => {
+    const mapping = suggestColumnMapping(['Transaction ID', 'Date', 'Item-Name', 'Quantity', 'Unit Price', 'Total Amount'])
+    expect(mapping.itemName).toBe('Item-Name')
+  })
+
+  it('maps all nine required columns automatically', () => {
+    const mapping = suggestColumnMapping([
+      'Transaction ID',
+      'Date',
+      'Time',
+      'Line ID',
+      'Item Name',
+      'Category',
+      'Quantity',
+      'Unit Price',
+      'Total Amount',
+    ])
+    expect(mapping.transactionId).toBe('Transaction ID')
+    expect(mapping.date).toBe('Date')
+    expect(mapping.time).toBe('Time')
+    expect(mapping.lineId).toBe('Line ID')
+    expect(mapping.itemName).toBe('Item Name')
+    expect(mapping.category).toBe('Category')
+    expect(mapping.quantity).toBe('Quantity')
+    expect(mapping.unitPrice).toBe('Unit Price')
+    expect(mapping.totalAmount).toBe('Total Amount')
+  })
+
   it('does not map two source columns to the same target field', () => {
     const mapping = suggestColumnMapping([
       'Transaction ID',

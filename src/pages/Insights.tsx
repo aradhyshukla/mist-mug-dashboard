@@ -39,12 +39,22 @@ const INSIGHT_ICONS: Record<string, typeof Lightbulb> = {
 }
 
 function formatMetric(metric: { label: string; value: string | number; format?: string }): string {
+  // Defensive: never render NaN, Infinity, null, or undefined.
+  if (metric.value === null || metric.value === undefined) return 'N/A'
+  if (typeof metric.value === 'number' && !Number.isFinite(metric.value)) return 'N/A'
+
   if (metric.format === 'inr') {
-    return formatInr(typeof metric.value === 'number' ? metric.value : parseFloat(String(metric.value)))
+    // metricInr already returns a pre-formatted currency string (e.g. "₹5,800").
+    // Do not re-parse it — parseFloat("₹5,800") would produce NaN.
+    if (typeof metric.value === 'string') return metric.value
+    return formatInr(metric.value)
   }
   if (metric.format === 'percent') {
-    return `${typeof metric.value === 'number' ? metric.value : parseFloat(String(metric.value))}%`
+    const v = typeof metric.value === 'number' ? metric.value : parseFloat(String(metric.value))
+    if (!Number.isFinite(v)) return 'N/A'
+    return `${v.toFixed(1)}%`
   }
+  // count / number: integer, no decimals
   return String(metric.value)
 }
 

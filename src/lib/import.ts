@@ -55,6 +55,7 @@ const ALIASES: Record<string, string> = {
   'time': 'time',
 
   // item_name
+  'item name': 'item_name',
   'product name': 'item_name',
   'product': 'item_name',
   'item': 'item_name',
@@ -100,7 +101,9 @@ export function normalizeHeader(header: string): string {
     .toString()
     .trim()
     .toLowerCase()
-    .replace(/[_\s]+/g, ' ')
+    // Treat underscores, hyphens, and whitespace as word separators so
+    // "Item-Name", "Item_Name", and "Item Name" all normalize to "item name".
+    .replace(/[_\-\s]+/g, ' ')
     .replace(/[^\w\s]/g, '')
     .trim()
 }
