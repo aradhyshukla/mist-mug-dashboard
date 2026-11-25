@@ -4,6 +4,7 @@ import { Search, Bell, Calendar, ChevronRight } from 'lucide-react'
 const PAGE_TITLES: Record<string, string> = {
   '/': 'Overview',
   '/analytics': 'Sales Analytics',
+  '/insights': 'Business Insights',
   '/upload': 'Upload Data',
   '/performance': 'Performance Tracker',
   '/settings': 'Settings',

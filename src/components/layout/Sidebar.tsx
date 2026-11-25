@@ -10,6 +10,7 @@ export interface SidebarItem {
 export const SIDEBAR_ITEMS: SidebarItem[] = [
   { label: 'Overview', href: '/', icon: DashboardIcon },
   { label: 'Sales Analytics', href: '/analytics', icon: BarChartIcon },
+  { label: 'Insights', href: '/insights', icon: LightbulbIcon },
   { label: 'Upload Data', href: '/upload', icon: UploadIcon },
   { label: 'Performance Tracker', href: '/performance', icon: ActivityIcon },
   { label: 'Settings', href: '/settings', icon: SettingsIcon },
@@ -85,6 +86,24 @@ function ActivityIcon({ className }: { className?: string }) {
       strokeLinejoin="round"
     >
       <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+    </svg>
+  )
+}
+
+function LightbulbIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      className={cn('h-5 w-5', className)}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M20 15h1a3 3 0 1 0-6 0h1" />
+      <path d="M8 7h8a3 3 0 0 1 3 3v3a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-3a3 3 0 0 1 3-3Z" />
     </svg>
   )
 }
