@@ -1,0 +1,71 @@
+// Auto-generated static product image manifest
+// Source: https://mist-and-mug.onrender.com (authoritative café website)
+// Product ID → static image path under /products/
+
+export const PRODUCT_IMAGES: Record<string, string> = {
+  "m01": "/products/m01.webp",
+  "m02": "/products/m02.webp",
+  "m03": "/products/m03.webp",
+  "m04": "/products/m04.webp",
+  "m05": "/products/m05.webp",
+  "m06": "/products/m06.webp",
+  "m07": "/products/m07.webp",
+  "m08": "/products/m08.webp",
+  "m09": "/products/m09.webp",
+  "m10": "/products/m10.webp",
+  "m11": "/products/m11.webp",
+  "m12": "/products/m12.webp",
+  "m13": "/products/m13.webp",
+  "m14": "/products/m14.webp",
+  "m15": "/products/m15.webp",
+  "m16": "/products/m16.webp",
+  "m17": "/products/m17.webp",
+  "m18": "/products/m18.webp",
+  "m19": "/products/m19.webp",
+  "m20": "/products/m20.webp",
+  "m21": "/products/m21.webp",
+  "m22": "/products/m22.webp",
+  "m23": "/products/m23.webp",
+  "m24": "/products/m24.webp",
+  "m25": "/products/m25.webp",
+  "m26": "/products/m26.webp",
+  "m27": "/products/m27.webp",
+  "m28": "/products/m28.webp",
+  "m29": "/products/m29.webp",
+  "m30": "/products/m30.webp"
+};
+
+// Name-based fallback for websites products whose stable ID may differ
+// across existing databases. Matches by exact normalized product name.
+export const PRODUCT_IMAGES_BY_NAME: Record<string, string> = {
+  "Landour Latte": "/products/m01.webp",
+  "Classic Cappuccino": "/products/m02.webp",
+  "Flat White": "/products/m03.webp",
+  "Espresso": "/products/m04.webp",
+  "Hazelnut Cortado": "/products/m05.webp",
+  "Cold Brew": "/products/m06.webp",
+  "Orange Espresso Tonic": "/products/m07.webp",
+  "Americano": "/products/m08.webp",
+  "Pahadi Masala Chai": "/products/m09.webp",
+  "Kashmiri Kahwa": "/products/m10.webp",
+  "Himalayan Hot Chocolate": "/products/m11.webp",
+  "Ginger Lemon Honey": "/products/m12.webp",
+  "Turmeric Milk": "/products/m13.webp",
+  "French Butter Croissant": "/products/m14.webp",
+  "Mountain Breakfast Plate": "/products/m15.webp",
+  "Avocado Sourdough": "/products/m16.webp",
+  "Wild Mushroom Toast": "/products/m17.webp",
+  "Cinnamon French Toast": "/products/m18.webp",
+  "Bun Maska": "/products/m19.webp",
+  "Cheese Chilli Toast": "/products/m20.webp",
+  "Himalayan Herb Fries": "/products/m21.webp",
+  "Roasted Vegetable Sandwich": "/products/m22.webp",
+  "Paneer Tikka Toastie": "/products/m23.webp",
+  "Soup of the Fog": "/products/m24.webp",
+  "Burnt Basque Cheesecake": "/products/m25.webp",
+  "Apple Cinnamon Tart": "/products/m26.webp",
+  "Dark Chocolate Eclair": "/products/m27.webp",
+  "Cloud Tiramisu": "/products/m28.webp",
+  "Classic Madeleines": "/products/m29.webp",
+  "Walnut Banana Loaf": "/products/m30.webp"
+};

@@ -273,6 +273,7 @@ export async function seedStarterCatalog(): Promise<void> {
         category: input.category,
         currentPriceInr: input.currentPriceInr,
         description: input.description,
+        imageUrl: input.imageUrl,
         source: 'website' as ProductSource,
         updatedAt: now,
       } as Partial<Product>)
@@ -295,6 +296,7 @@ export async function seedStarterCatalog(): Promise<void> {
         category: input.category,
         currentPriceInr: input.currentPriceInr,
         description: input.description,
+        imageUrl: input.imageUrl,
         source: 'website' as ProductSource,
         updatedAt: now,
       } as Partial<Product>)

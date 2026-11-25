@@ -1,5 +1,7 @@
 import { type Product } from '@/types'
 import { cn } from '@/lib/utils'
+import { useState } from 'react'
+import { PRODUCT_IMAGES, PRODUCT_IMAGES_BY_NAME } from '@/lib/product-images'
 
 type ProductCardProps = {
   product: Product
@@ -19,6 +21,21 @@ export const CATEGORY_COLORS: Record<string, { bg: string; text: string; border:
 
 export function ProductCard({ product, onEdit, onDeactivate, onActivate }: ProductCardProps) {
   const catStyle = CATEGORY_COLORS[product.category] || CATEGORY_COLORS.Coffee
+  const [imgError, setImgError] = useState(false)
+
+  // Resolve image for verified website products from the static manifest.
+  // Prefer stable product ID (m01-m30); fall back to exact-name match for
+  // existing databases where IDs may differ. User-supplied products keep
+  // their custom imageUrl.
+  const normalizedName = product.name.trim().toLowerCase()
+  const imageByName = product.source === 'website'
+    ? Object.entries(PRODUCT_IMAGES_BY_NAME).find(([name]) => name.trim().toLowerCase() === normalizedName)?.[1]
+    : undefined
+
+  const resolvedImageUrl =
+    product.source === 'website'
+      ? PRODUCT_IMAGES[product.id] ?? imageByName ?? product.imageUrl
+      : product.imageUrl
 
   return (
     <article
@@ -29,10 +46,13 @@ export function ProductCard({ product, onEdit, onDeactivate, onActivate }: Produ
     >
       {/* Image area */}
       <div className="relative h-48 overflow-hidden rounded-t-xl border-b border-border group-hover:border-gold/50 transition-colors">
-        {product.imageUrl ? (
+        {resolvedImageUrl && !imgError ? (
           <img
-            src={product.imageUrl}
+            src={resolvedImageUrl}
             alt={product.name}
+            loading="lazy"
+            decoding="async"
+            onError={() => setImgError(true)}
             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
           />
         ) : (
@@ -42,14 +62,16 @@ export function ProductCard({ product, onEdit, onDeactivate, onActivate }: Produ
             catStyle.border,
           )}>
             <span className="text-2xl text-rain/40">{catStyle.icon}</span>
-            <button
-              className="absolute bottom-3 left-1/2 -translate-x-1/2 w-16 h-6 rounded-full bg-paperSoft/95 border border-border flex items-center justify-center gap-1 text-[10px] text-ink font-medium opacity-0 group-hover:opacity-100 transition-opacity hover:bg-white"
-            >
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                <path d="M4 16c0-1.886 1.584-3.431 3.599-3.576a9 9 0 103.802 3.576C14.416 12.569 16 11.114 16 9.5 16 7.02 14.02 5 12 5S8 7.02 8 9.5zM12 14l7-3-3 4.755V13l-4 3zm0-6l4-4.755V7l-3 3z" />
-              </svg>
-              Add photo
-            </button>
+            {product.source === 'user' && (
+              <button
+                className="absolute bottom-3 left-1/2 -translate-x-1/2 w-16 h-6 rounded-full bg-paperSoft/95 border border-border flex items-center justify-center gap-1 text-[10px] text-ink font-medium opacity-0 group-hover:opacity-100 transition-opacity hover:bg-white"
+              >
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <path d="M4 16c0-1.886 1.584-3.431 3.599-3.576a9 9 0 103.802 3.576C14.416 12.569 16 11.114 16 9.5 16 7.02 14.02 5 12 5S8 7.02 8 9.5zM12 14l7-3-3 4.755V13l-4 3zm0-6l4-4.755V7l-3 3z" />
+                </svg>
+                Add photo
+              </button>
+            )}
           </div>
         )}
         {/* Status badge */}

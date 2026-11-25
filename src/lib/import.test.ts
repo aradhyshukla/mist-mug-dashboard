@@ -17,6 +17,7 @@ import { db, saveImportResult, removeImportBatch, seedStarterCatalog, getImportL
 import type { ImportResult, ProcessedLine, Product, ProductId, UploadBatchId } from '@/types'
 import { emitDataChanged, onDataChanged } from '@/lib/events'
 import { getLatestTransactionDate } from '@/lib/analytics'
+import { PRODUCT_IMAGES, PRODUCT_IMAGES_BY_NAME } from '@/lib/product-images'
 
 describe('normalizeHeader', () => {
   it('normalizes headers to lowercase with single spaces', () => {
@@ -1064,6 +1065,66 @@ describe('seedStarterCatalog (catalogue sync)', () => {
     } else {
       expect(bulkAddSpy2).not.toHaveBeenCalled()
     }
+  })
+
+  it('has static image manifest entry for every website product', async () => {
+    const { bulkAddSpy } = mockProductDb([])
+    await seedStarterCatalog()
+    const stored = bulkAddSpy.mock.calls[0][0]
+    expect(stored).toHaveLength(30)
+    // Every website product id must have a static image manifest entry
+    expect(
+      stored.every((p) => !!PRODUCT_IMAGES[p.id] || !!PRODUCT_IMAGES_BY_NAME[p.name]),
+    ).toBe(true)
+    // Spot-check mapping against the static image manifest
+    expect(PRODUCT_IMAGES['m01']).toBe('/products/m01.webp')
+    expect(PRODUCT_IMAGES['m06']).toBe('/products/m06.webp')
+    expect(PRODUCT_IMAGES['m25']).toBe('/products/m25.webp')
+    expect(PRODUCT_IMAGES_BY_NAME['Landour Latte']).toBe('/products/m01.webp')
+    expect(PRODUCT_IMAGES_BY_NAME['Cold Brew']).toBe('/products/m06.webp')
+    expect(PRODUCT_IMAGES_BY_NAME['Burnt Basque Cheesecake']).toBe('/products/m25.webp')
+  })
+
+  it('has no duplicate product ids', async () => {
+    const { bulkAddSpy } = mockProductDb([])
+    await seedStarterCatalog()
+    const stored = bulkAddSpy.mock.calls[0][0]
+    const ids = stored.map((p) => p.id)
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  it('does not modify historical transactions during seeding', async () => {
+    const txBulkAddSpy = vi.spyOn(db.transactions, 'bulkAdd').mockResolvedValue(undefined as any)
+    const txPutSpy = vi.spyOn(db.transactions, 'put').mockResolvedValue(undefined as any)
+    const txUpdateSpy = vi.spyOn(db.transactions, 'update').mockResolvedValue(undefined as any)
+    const txDeleteSpy = vi.spyOn(db.transactions, 'delete').mockResolvedValue(undefined as any)
+
+    const { bulkAddSpy } = mockProductDb([])
+    await seedStarterCatalog()
+
+    // Catalogue is seeded
+    const stored = bulkAddSpy.mock.calls[0][0]
+    expect(stored).toHaveLength(30)
+    expect(stored.every((p) => p.source === 'website')).toBe(true)
+
+    // Historical transactions are never touched by catalogue seeding
+    expect(txBulkAddSpy).not.toHaveBeenCalled()
+    expect(txPutSpy).not.toHaveBeenCalled()
+    expect(txUpdateSpy).not.toHaveBeenCalled()
+    expect(txDeleteSpy).not.toHaveBeenCalled()
+  })
+
+  it('preserves user-supplied imageUrl for non-website products', async () => {
+    const userProduct = makeProduct({
+      name: 'User Custom Blend',
+      source: 'user',
+      id: 'user1' as ProductId,
+      imageUrl: '/products/custom.webp',
+    })
+    const { updateSpy } = mockProductDb([userProduct])
+    await seedStarterCatalog()
+    // User product imageUrl is preserved (not overwritten by static manifest)
+    expect(updateSpy).not.toHaveBeenCalledWith('user1', expect.anything())
   })
 })
 
